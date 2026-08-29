@@ -3,327 +3,594 @@
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<title>Baileys · Painel de Sessões</title>
+		<title>Baileys Hub · Painel</title>
 		<style>
 			:root {
-				--bg: #0f1419;
-				--panel: #1a2129;
-				--panel-2: #222b35;
-				--border: #2d3742;
-				--text: #e6edf3;
-				--muted: #8b98a5;
-				--accent: #25d366;
-				--accent-2: #1e9e4f;
-				--danger: #e5534b;
-				--warn: #d99e2b;
-				--radius: 12px;
+				--bg: #f4f6fb;
+				--surface: #ffffff;
+				--surface-2: #eef1f7;
+				--surface-3: #e6eaf2;
+				--border: #e2e7f0;
+				--border-strong: #d4dae6;
+				--text: #131a24;
+				--muted: #616d7e;
+				--faint: #8a95a5;
+				--accent: #1fa855;
+				--accent-2: #17843f;
+				--accent-soft: rgba(31, 168, 85, 0.12);
+				--blue: #2f6bff;
+				--amber: #d68a1a;
+				--red: #e0483d;
+				--shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 4px 16px rgba(16, 24, 40, 0.06);
+				--shadow-lg: 0 8px 40px rgba(16, 24, 40, 0.16);
+				--r: 14px;
+				--r-sm: 10px;
 			}
+			:root[data-theme='dark'],
+			:root:not([data-theme='light']) {
+			}
+			@media (prefers-color-scheme: dark) {
+				:root:not([data-theme='light']) {
+					--bg: #0b0f15;
+					--surface: #141b24;
+					--surface-2: #1b232e;
+					--surface-3: #222c39;
+					--border: #263140;
+					--border-strong: #33404f;
+					--text: #e7edf5;
+					--muted: #97a4b4;
+					--faint: #6c7a8b;
+					--accent: #25d366;
+					--accent-2: #1fae54;
+					--accent-soft: rgba(37, 211, 102, 0.14);
+					--blue: #5b8cff;
+					--amber: #e0a53a;
+					--red: #ef5b52;
+					--shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
+					--shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.55);
+				}
+			}
+			:root[data-theme='dark'] {
+				--bg: #0b0f15;
+				--surface: #141b24;
+				--surface-2: #1b232e;
+				--surface-3: #222c39;
+				--border: #263140;
+				--border-strong: #33404f;
+				--text: #e7edf5;
+				--muted: #97a4b4;
+				--faint: #6c7a8b;
+				--accent: #25d366;
+				--accent-2: #1fae54;
+				--accent-soft: rgba(37, 211, 102, 0.14);
+				--blue: #5b8cff;
+				--amber: #e0a53a;
+				--red: #ef5b52;
+				--shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
+				--shadow-lg: 0 12px 48px rgba(0, 0, 0, 0.55);
+			}
+
 			* { box-sizing: border-box; }
+			html, body { height: 100%; }
 			body {
 				margin: 0;
-				font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 				background: var(--bg);
 				color: var(--text);
+				font: 14.5px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+				-webkit-font-smoothing: antialiased;
 			}
-			header {
-				display: flex; align-items: center; justify-content: space-between;
-				padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--panel);
-				position: sticky; top: 0; z-index: 10;
+			svg { display: block; }
+			.ic { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+			.ic-sm { width: 15px; height: 15px; }
+			button { font: inherit; cursor: pointer; }
+
+			/* ---- App shell ---- */
+			.topbar {
+				position: sticky; top: 0; z-index: 20;
+				display: flex; align-items: center; gap: 20px;
+				height: 60px; padding: 0 22px;
+				background: color-mix(in srgb, var(--surface) 88%, transparent);
+				backdrop-filter: saturate(180%) blur(12px);
+				border-bottom: 1px solid var(--border);
 			}
-			header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 10px; }
-			.logo { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; color: #06251a; font-weight: 800; }
-			.wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
-			button {
-				font: inherit; cursor: pointer; border: 1px solid var(--border);
-				background: var(--panel-2); color: var(--text); padding: 8px 14px; border-radius: 9px;
-				transition: background .15s, border-color .15s;
+			.brand { display: flex; align-items: center; gap: 11px; font-weight: 700; font-size: 15px; letter-spacing: -0.2px; }
+			.brand .logo {
+				width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+				background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #04180d;
 			}
-			button:hover { background: #2b3742; }
-			button.primary { background: var(--accent); border-color: var(--accent); color: #06251a; font-weight: 700; }
-			button.primary:hover { background: var(--accent-2); }
-			button.danger { color: #ffd7d4; border-color: #55302e; }
-			button.danger:hover { background: #3a2321; }
-			button.ghost { background: transparent; }
-			.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 20px; }
-			.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-			.card h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
-			.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-			.muted { color: var(--muted); font-size: 13px; word-break: break-all; }
-			.badge { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
-			.badge.open { background: rgba(37,211,102,.15); color: #4ade80; }
-			.badge.qr, .badge.pairing { background: rgba(217,158,43,.15); color: var(--warn); }
-			.badge.connecting { background: rgba(88,166,255,.15); color: #58a6ff; }
-			.badge.close, .badge.idle { background: rgba(139,152,165,.15); color: var(--muted); }
-			.badge.logged_out { background: rgba(229,83,75,.15); color: var(--danger); }
-			.actions { display: flex; flex-wrap: wrap; gap: 8px; }
-			.actions button { padding: 6px 11px; font-size: 13px; }
-			.empty { text-align: center; color: var(--muted); padding: 60px 20px; }
-			dialog {
-				border: 1px solid var(--border); background: var(--panel); color: var(--text);
-				border-radius: var(--radius); padding: 0; width: min(460px, 92vw);
+			.brand small { color: var(--faint); font-weight: 500; }
+			.nav { display: flex; gap: 4px; margin-left: 8px; }
+			.nav button {
+				display: inline-flex; align-items: center; gap: 8px;
+				border: 1px solid transparent; background: transparent; color: var(--muted);
+				padding: 8px 13px; border-radius: 10px; font-weight: 600; font-size: 13.5px;
+				transition: background .15s, color .15s;
 			}
-			dialog::backdrop { background: rgba(0,0,0,.6); }
-			.dlg-head { padding: 18px 20px; border-bottom: 1px solid var(--border); font-weight: 700; }
-			.dlg-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
-			.dlg-foot { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
-			label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
-			input, textarea {
-				font: inherit; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-				border-radius: 8px; padding: 9px 11px; width: 100%;
+			.nav button:hover { background: var(--surface-2); color: var(--text); }
+			.nav button.active { background: var(--accent-soft); color: var(--accent-2); }
+			:root:not([data-theme='light']) .nav button.active { color: var(--accent); }
+			@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .nav button.active { color: var(--accent); } }
+			.spacer { flex: 1; }
+			.icon-btn {
+				position: relative; width: 38px; height: 38px; display: grid; place-items: center;
+				border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+				border-radius: 10px; transition: background .15s, color .15s, border-color .15s;
 			}
-			.qr-box { display: grid; place-items: center; gap: 10px; padding: 8px; }
-			.qr-box img { width: 250px; height: 250px; background: #fff; border-radius: 10px; padding: 8px; }
-			.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-			.chip { font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; cursor: pointer; user-select: none; }
-			.chip.on { background: rgba(37,211,102,.15); border-color: var(--accent); color: #4ade80; }
-			.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--border); padding: 12px 18px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
-			.toast.show { opacity: 1; }
-			.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: sp .8s linear infinite; }
+			.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+			.icon-btn .dot {
+				position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px;
+				background: var(--red); color: #fff; font-size: 10px; font-weight: 700; border-radius: 999px;
+				display: none; place-items: center; border: 2px solid var(--surface);
+			}
+			.user-chip {
+				display: flex; align-items: center; gap: 9px; padding: 5px 12px 5px 6px;
+				border: 1px solid var(--border); border-radius: 999px; background: var(--surface); max-width: 230px;
+			}
+			.user-chip .av { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+				background: var(--surface-3); color: var(--muted); font-weight: 700; font-size: 12px; flex: none; }
+			.user-chip span { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+			.wrap { max-width: 1180px; margin: 0 auto; padding: 26px 22px 60px; }
+			.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+			.page-head h1 { font-size: 20px; margin: 0 0 3px; letter-spacing: -0.3px; }
+			.page-head p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+			.btn {
+				display: inline-flex; align-items: center; gap: 8px; border-radius: 10px; font-weight: 600; font-size: 13.5px;
+				padding: 9px 15px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+				transition: background .15s, border-color .15s, transform .05s;
+			}
+			.btn:hover { background: var(--surface-2); }
+			.btn:active { transform: translateY(1px); }
+			.btn.primary { background: var(--accent); border-color: var(--accent); color: #04180d; }
+			.btn.primary:hover { background: var(--accent-2); }
+			.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+			.btn.ghost:hover { background: var(--surface-2); color: var(--text); }
+			.btn.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
+			.btn.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+			.btn.sm { padding: 6px 11px; font-size: 12.5px; border-radius: 9px; }
+
+			/* ---- Stat tiles ---- */
+			.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 22px; }
+			.stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; box-shadow: var(--shadow); }
+			.stat .n { font-size: 26px; font-weight: 750; letter-spacing: -0.5px; line-height: 1.1; }
+			.stat .l { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; margin-top: 6px; font-weight: 500; }
+			.sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); }
+			.sdot.open { background: var(--accent); }
+			.sdot.qr { background: var(--amber); }
+			.sdot.off { background: var(--red); }
+
+			/* ---- Cards grid ---- */
+			.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+			.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 18px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 14px; }
+			.card-top { display: flex; align-items: center; gap: 12px; }
+			.mono { width: 42px; height: 42px; border-radius: 11px; display: grid; place-items: center; font-weight: 750; font-size: 17px; color: #fff; flex: none; letter-spacing: -0.5px; }
+			.card-top .who { min-width: 0; flex: 1; }
+			.card-top .who h3 { margin: 0; font-size: 15.5px; letter-spacing: -0.2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.card-top .who .sub { color: var(--faint); font-size: 12px; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }
+			.pill .d { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+			.pill.open { color: var(--accent-2); background: var(--accent-soft); }
+			:root:not([data-theme='light']) .pill.open { color: var(--accent); }
+			@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .pill.open { color: var(--accent); } }
+			.pill.qr, .pill.pairing { color: var(--amber); background: color-mix(in srgb, var(--amber) 15%, transparent); }
+			.pill.connecting { color: var(--blue); background: color-mix(in srgb, var(--blue) 15%, transparent); }
+			.pill.close, .pill.idle { color: var(--muted); background: var(--surface-2); }
+			.pill.logged_out { color: var(--red); background: color-mix(in srgb, var(--red) 13%, transparent); }
+
+			.meta { display: flex; flex-direction: column; gap: 7px; }
+			.meta .row { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; }
+			.meta .row .ic { color: var(--faint); }
+			.meta .row b { color: var(--text); font-weight: 600; }
+			.meta .row .val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+			.card-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border); margin-top: 2px; }
+			.card-actions { padding-top: 14px; }
+
+			.empty { text-align: center; color: var(--muted); padding: 70px 20px; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--r); }
+			.empty .big { width: 46px; height: 46px; margin: 0 auto 14px; color: var(--faint); }
+			.empty b { color: var(--text); }
+
+			/* ---- Table (apps) ---- */
+			.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden; }
+			table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+			th, td { text-align: left; padding: 13px 18px; border-bottom: 1px solid var(--border); }
+			th { color: var(--faint); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; background: var(--surface-2); }
+			tr:last-child td { border-bottom: none; }
+			code.key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2); padding: 3px 8px; border-radius: 6px; font-size: 12.5px; }
+			.banner { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--blue) 9%, transparent); border: 1px solid color-mix(in srgb, var(--blue) 25%, transparent); color: var(--text); font-size: 13px; margin-bottom: 18px; }
+			.banner .ic { color: var(--blue); margin-top: 1px; }
+
+			/* ---- Health ---- */
+			.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+			.hcard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 18px; box-shadow: var(--shadow); }
+			.hcard .h { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12.5px; font-weight: 600; margin-bottom: 12px; }
+			.hcard .h .ic { color: var(--faint); }
+			.hcard .v { font-size: 22px; font-weight: 750; letter-spacing: -0.4px; }
+			.hcard .vsub { color: var(--muted); font-size: 12.5px; margin-top: 4px; }
+			.bar { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin-top: 12px; }
+			.bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 999px; }
+			.kv { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+			.kv:last-child { border-bottom: none; }
+			.kv .k { color: var(--muted); }
+			.kv .v2 { font-weight: 600; }
+
+			/* ---- Dialogs ---- */
+			dialog { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: var(--r); padding: 0; width: min(480px, 94vw); box-shadow: var(--shadow-lg); }
+			dialog::backdrop { background: rgba(8, 12, 18, 0.55); backdrop-filter: blur(2px); }
+			.dlg-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 15px; }
+			.dlg-head .x { border: none; background: transparent; color: var(--faint); padding: 4px; border-radius: 8px; }
+			.dlg-head .x:hover { background: var(--surface-2); color: var(--text); }
+			.dlg-body { padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+			.dlg-foot { padding: 15px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+			label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+			input[type='text'], input[type='url'], input:not([type]) {
+				font: inherit; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text);
+				border-radius: var(--r-sm); padding: 10px 12px; width: 100%;
+			}
+			input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+			.chips { display: flex; flex-wrap: wrap; gap: 7px; }
+			.chip { font-size: 12px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 999px; padding: 5px 11px; cursor: pointer; user-select: none; color: var(--muted); transition: all .12s; }
+			.chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-2); }
+			:root:not([data-theme='light']) .chip.on { color: var(--accent); }
+			@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .chip.on { color: var(--accent); } }
+
+			.qr-box { display: grid; place-items: center; gap: 14px; padding: 6px; text-align: center; }
+			.qr-box img { width: 258px; height: 258px; background: #fff; border-radius: 14px; padding: 12px; box-shadow: var(--shadow); }
+			.qr-hint { color: var(--muted); font-size: 13px; max-width: 300px; }
+			.spin { width: 26px; height: 26px; border: 3px solid var(--surface-3); border-top-color: var(--accent); border-radius: 50%; animation: sp .8s linear infinite; }
 			@keyframes sp { to { transform: rotate(360deg); } }
-			@media (prefers-color-scheme: light) {
-				:root { --bg:#f5f7fa; --panel:#fff; --panel-2:#eef1f5; --border:#dce1e8; --text:#1a2129; --muted:#5b6773; }
+			.ok-check { width: 54px; height: 54px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-2); display: grid; place-items: center; }
+
+			.upd-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+			.upd-row:last-child { border-bottom: none; }
+			.upd-badge { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 999px; font-weight: 700; font-size: 13px; }
+			.upd-badge.up { background: color-mix(in srgb, var(--amber) 15%, transparent); color: var(--amber); }
+			.upd-badge.ok { background: var(--accent-soft); color: var(--accent-2); }
+			pre.cmd { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 12px 14px; overflow-x: auto; font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; }
+			a { color: var(--blue); text-decoration: none; }
+			a:hover { text-decoration: underline; }
+
+			.toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(8px); background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-lg); padding: 12px 18px; border-radius: 12px; opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none; z-index: 50; display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
+			.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+			.toast .ic { color: var(--accent-2); }
+
+			@media (max-width: 720px) {
+				.stats { grid-template-columns: repeat(2, 1fr); }
+				.brand small, .user-chip span { display: none; }
+				.nav button span { display: none; }
+				.nav button { padding: 8px; }
 			}
 		</style>
 	</head>
 	<body>
-		<header>
-			<h1><span class="logo">B</span> Baileys · Painel de Sessões</h1>
-			<div style="display:flex; gap:10px; align-items:center;">
-				<span id="who" class="muted"></span>
-				<button class="primary" id="btn-new">+ Nova sessão</button>
+		<header class="topbar">
+			<div class="brand">
+				<span class="logo">
+					<svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v12H5.5L4 18z"/><path d="M8 9h8M8 12h5"/></svg>
+				</span>
+				Baileys Hub <small>· WhatsApp</small>
+			</div>
+			<nav class="nav" id="nav"></nav>
+			<div class="spacer"></div>
+			<button class="icon-btn" id="btn-updates" title="Atualizações">
+				<svg class="ic" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+				<span class="dot" id="upd-dot">1</span>
+			</button>
+			<div class="user-chip" title="Sessão Cloudflare Access">
+				<span class="av" id="user-av">–</span>
+				<span id="user-email">carregando…</span>
 			</div>
 		</header>
 
-		<div class="wrap">
-			<div id="grid" class="grid"></div>
-			<div id="empty" class="empty" hidden>Nenhuma sessão ainda. Clique em <b>“+ Nova sessão”</b> para conectar um número.</div>
-		</div>
+		<main class="wrap">
+			<!-- ============ SESSÕES ============ -->
+			<section id="sec-sessions">
+				<div class="page-head">
+					<div><h1>Sessões</h1><p>Números do WhatsApp conectados a este servidor central.</p></div>
+					<button class="btn primary" id="btn-new">
+						<svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Nova sessão
+					</button>
+				</div>
+				<div class="stats" id="stats"></div>
+				<div class="grid" id="grid"></div>
+				<div class="empty" id="empty" hidden>
+					<svg class="ic big" viewBox="0 0 24 24"><path d="M4 4h16v12H5.5L4 18z"/><path d="M8 9h8M8 12h5"/></svg>
+					Nenhuma sessão ainda. Clique em <b>“Nova sessão”</b> para conectar um número.
+				</div>
+			</section>
 
+			<!-- ============ APLICATIVOS ============ -->
+			<section id="sec-apps" hidden>
+				<div class="page-head">
+					<div><h1>Aplicativos & API</h1><p>Chaves de API que suas aplicações usam para falar com este servidor.</p></div>
+				</div>
+				<div class="banner">
+					<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+					<div>As chaves são definidas em <code class="key">API_KEYS</code> no <code class="key">.env</code> do servidor. Cada aplicação envia a sua no header <code class="key">Authorization: Bearer &lt;chave&gt;</code>. Gerenciar chaves (criar/revogar) e nomes pelo painel está no roadmap.</div>
+				</div>
+				<div class="panel">
+					<table>
+						<thead><tr><th>App</th><th>Chave (mascarada)</th><th>Requisições</th><th>Último uso</th><th>Último IP</th></tr></thead>
+						<tbody id="apps-body"></tbody>
+					</table>
+				</div>
+			</section>
+
+			<!-- ============ SAÚDE ============ -->
+			<section id="sec-health" hidden>
+				<div class="page-head">
+					<div><h1>Saúde da plataforma</h1><p>Estado do processo, memória e armazenamento.</p></div>
+					<button class="btn sm" id="btn-refresh-health">
+						<svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg> Atualizar
+					</button>
+				</div>
+				<div class="health-grid" id="health"></div>
+			</section>
+		</main>
+
+		<!-- ===== Dialog: nova sessão ===== -->
 		<dialog id="dlg-new">
 			<form method="dialog">
-				<div class="dlg-head">Nova sessão</div>
+				<div class="dlg-head">Nova sessão <button type="button" class="x" data-close><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
 				<div class="dlg-body">
-					<label>ID (opcional, único) <input name="id" placeholder="ex.: vendas, suporte" /></label>
-					<label>Nome <input name="name" placeholder="Ex.: Atendimento Vendas" /></label>
-					<label>Webhook URL (opcional) <input name="webhookUrl" placeholder="https://minha-app.com/webhook" /></label>
-					<label>Eventos enviados ao webhook</label>
+					<label class="field">ID (opcional, único)<input name="id" placeholder="ex.: vendas, suporte" /></label>
+					<label class="field">Nome<input name="name" placeholder="Ex.: Atendimento Vendas" /></label>
+					<label class="field">Webhook URL (opcional)<input name="webhookUrl" type="url" placeholder="https://minha-app/webhook" /></label>
+					<label class="field">Eventos enviados ao webhook</label>
 					<div class="chips" id="new-events"></div>
 				</div>
 				<div class="dlg-foot">
-					<button value="cancel" class="ghost">Cancelar</button>
-					<button value="ok" class="primary" id="new-ok">Criar</button>
+					<button value="cancel" class="btn ghost">Cancelar</button>
+					<button value="ok" class="btn primary">Criar sessão</button>
 				</div>
 			</form>
 		</dialog>
 
-		<dialog id="dlg-qr">
-			<div class="dlg-head" id="qr-title">Conectar</div>
-			<div class="dlg-body">
-				<div class="qr-box" id="qr-body"></div>
-			</div>
-			<div class="dlg-foot">
-				<button class="ghost" id="qr-close">Fechar</button>
-			</div>
-		</dialog>
-
+		<!-- ===== Dialog: editar ===== -->
 		<dialog id="dlg-edit">
 			<form method="dialog">
-				<div class="dlg-head">Editar sessão</div>
+				<div class="dlg-head">Editar sessão <button type="button" class="x" data-close><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
 				<div class="dlg-body">
 					<input type="hidden" name="id" />
-					<label>Nome <input name="name" /></label>
-					<label>Webhook URL <input name="webhookUrl" placeholder="https://minha-app.com/webhook" /></label>
-					<label>Eventos enviados ao webhook</label>
+					<label class="field">Nome<input name="name" /></label>
+					<label class="field">Webhook URL<input name="webhookUrl" type="url" placeholder="https://minha-app/webhook" /></label>
+					<label class="field">Eventos enviados ao webhook</label>
 					<div class="chips" id="edit-events"></div>
 				</div>
 				<div class="dlg-foot">
-					<button value="cancel" class="ghost">Cancelar</button>
-					<button value="ok" class="primary">Salvar</button>
+					<button value="cancel" class="btn ghost">Cancelar</button>
+					<button value="ok" class="btn primary">Salvar</button>
 				</div>
 			</form>
+		</dialog>
+
+		<!-- ===== Dialog: QR ===== -->
+		<dialog id="dlg-qr">
+			<div class="dlg-head" id="qr-title">Conectar <button type="button" class="x" id="qr-close"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+			<div class="dlg-body"><div class="qr-box" id="qr-body"></div></div>
+		</dialog>
+
+		<!-- ===== Dialog: atualizações ===== -->
+		<dialog id="dlg-upd">
+			<div class="dlg-head">Atualizações do Baileys <button type="button" class="x" data-close-upd><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+			<div class="dlg-body" id="upd-body"><div class="qr-box"><div class="spin"></div><div class="qr-hint">Consultando o GitHub…</div></div></div>
+			<div class="dlg-foot">
+				<button class="btn sm" id="upd-refresh"><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg> Verificar de novo</button>
+				<button class="btn primary" data-close-upd>Fechar</button>
+			</div>
 		</dialog>
 
 		<div class="toast" id="toast"></div>
 
 		<script>
-			const EVENTS = [
-				'connection.update', 'messages.upsert', 'messages.update', 'messages.delete',
-				'message-receipt.update', 'messages.reaction', 'presence.update',
-				'chats.upsert', 'chats.update', 'contacts.upsert', 'contacts.update',
-				'groups.upsert', 'groups.update', 'call'
-			]
-			const STATUS_LABEL = {
-				idle: 'ocioso', connecting: 'conectando', qr: 'aguardando QR', pairing: 'aguardando código',
-				open: 'conectado', close: 'desconectado', logged_out: 'deslogado'
-			}
+			const EVENTS = ['connection.update','messages.upsert','messages.update','messages.delete','message-receipt.update','messages.reaction','presence.update','chats.upsert','chats.update','contacts.upsert','contacts.update','groups.upsert','groups.update','call']
+			const STATUS = { idle:'ocioso', connecting:'conectando', qr:'aguardando QR', pairing:'código', open:'conectado', close:'desconectado', logged_out:'deslogado' }
+			const MONO_COLORS = ['#1fa855','#2f6bff','#8b5cf6','#e0483d','#d68a1a','#0ea5a4','#d6336c','#5b6470']
 
-			const api = async (path, opts = {}) => {
-				const res = await fetch('/api' + path, {
-					headers: { 'Content-Type': 'application/json' },
-					...opts
-				})
+			const $ = s => document.querySelector(s)
+			const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+			const svg = p => `<svg class="ic" viewBox="0 0 24 24">${p}</svg>`
+			const ICON = {
+				phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
+				user:'<circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/>',
+				hook:'<path d="M18 4v6a4 4 0 0 1-4 4H6"/><path d="M9 11l-3 3 3 3"/>',
+				qr:'<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z"/><path d="M14 14h2v2M20 14v2M14 18v2h2M18 18h2v2"/>',
+				refresh:'<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+				power:'<path d="M12 4v8"/><path d="M6.3 7.3a8 8 0 1 0 11.4 0"/>',
+				edit:'<path d="M4 20h4L18 10l-4-4L4 16z"/><path d="M13 5l4 4"/>',
+				trash:'<path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/>',
+			}
+			const bytes = n => { if (n==null) return '—'; const u=['B','KB','MB','GB','TB']; let i=0,v=n; while(v>=1024&&i<u.length-1){v/=1024;i++} return (i?v.toFixed(1):v)+' '+u[i] }
+			const dur = s => { if(s==null) return '—'; const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return (d?d+'d ':'')+(h?h+'h ':'')+(d?'':m+'m') || '0m' }
+			const ago = iso => { if(!iso) return 'nunca'; const s=(Date.now()-new Date(iso))/1000; if(s<60)return 'agora'; if(s<3600)return Math.floor(s/60)+' min atrás'; if(s<86400)return Math.floor(s/3600)+' h atrás'; return Math.floor(s/86400)+' d atrás' }
+
+			const api = async (path, opts={}) => {
+				const res = await fetch('/api'+path, { headers:{'Content-Type':'application/json'}, ...opts })
 				if (res.status === 204) return null
-				const data = await res.json().catch(() => ({}))
+				const data = await res.json().catch(()=>({}))
 				if (!res.ok) throw new Error(data.message || res.statusText)
 				return data
 			}
+			const toast = (msg, ok=true) => { const t=$('#toast'); t.innerHTML=(ok?svg('<path d="M20 6L9 17l-5-5"/>'):svg('<path d="M12 8v5M12 16h.01"/><circle cx="12" cy="12" r="9"/>'))+esc(msg); t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),2800) }
 
-			const toast = (msg) => {
-				const t = document.getElementById('toast')
-				t.textContent = msg; t.classList.add('show')
-				setTimeout(() => t.classList.remove('show'), 2600)
+			/* ---------- navigation ---------- */
+			const SECTIONS = [
+				{ id:'sessions', label:'Sessões', icon:'<path d="M4 5h16v6H4zM4 15h16v4H4z"/>' },
+				{ id:'apps', label:'Aplicativos', icon:'<path d="M10 3l4 4-7 7-4 1 1-4z"/><path d="M14 7l3 3 3-3-3-3z"/>' },
+				{ id:'health', label:'Saúde', icon:'<path d="M3 12h4l2 6 4-14 2 8h6"/>' },
+			]
+			let current = 'sessions'
+			const buildNav = () => {
+				$('#nav').innerHTML = SECTIONS.map(s => `<button data-sec="${s.id}"><svg class="ic ic-sm" viewBox="0 0 24 24">${s.icon}</svg><span>${s.label}</span></button>`).join('')
+				$('#nav').querySelectorAll('button').forEach(b => b.onclick = () => go(b.dataset.sec))
+			}
+			const go = (sec) => {
+				current = sec
+				SECTIONS.forEach(s => $('#sec-'+s.id).hidden = s.id !== sec)
+				$('#nav').querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.sec === sec))
+				if (sec === 'apps') loadApps()
+				if (sec === 'health') loadHealth()
 			}
 
-			const chipRow = (container, selected) => {
-				container.innerHTML = ''
-				EVENTS.forEach(ev => {
-					const c = document.createElement('span')
-					c.className = 'chip' + (selected.includes(ev) ? ' on' : '')
-					c.textContent = ev
-					c.onclick = () => c.classList.toggle('on')
-					container.appendChild(c)
-				})
-			}
-			const readChips = (container) =>
-				[...container.querySelectorAll('.chip.on')].map(c => c.textContent)
+			/* ---------- sessions ---------- */
+			const chips = (el, sel) => { el.innerHTML=''; EVENTS.forEach(ev => { const c=document.createElement('span'); c.className='chip'+(sel.includes(ev)?' on':''); c.textContent=ev; c.onclick=()=>c.classList.toggle('on'); el.appendChild(c) }) }
+			const readChips = el => [...el.querySelectorAll('.chip.on')].map(c => c.textContent)
 
-			const render = (sessions) => {
-				const grid = document.getElementById('grid')
-				document.getElementById('empty').hidden = sessions.length > 0
-				grid.innerHTML = ''
-				sessions.forEach(s => {
-					const card = document.createElement('div')
-					card.className = 'card'
-					const phone = s.phoneNumber ? '+' + s.phoneNumber : '—'
+			const renderStats = (list) => {
+				const c = { open:0, qr:0, off:0 }
+				list.forEach(s => { if(s.status==='open')c.open++; else if(s.status==='qr'||s.status==='pairing')c.qr++; else if(s.status==='close'||s.status==='logged_out')c.off++ })
+				$('#stats').innerHTML = [
+					['Total', list.length, ''],['Conectadas', c.open, 'open'],['Aguardando QR', c.qr, 'qr'],['Offline', c.off, 'off']
+				].map(([l,n,d]) => `<div class="stat"><div class="n">${n}</div><div class="l"><span class="sdot ${d}"></span>${l}</div></div>`).join('')
+			}
+			const renderSessions = (list) => {
+				renderStats(list)
+				$('#empty').hidden = list.length > 0
+				const grid = $('#grid'); grid.innerHTML = ''
+				list.forEach(s => {
+					const color = MONO_COLORS[[...s.id].reduce((a,c)=>a+c.charCodeAt(0),0) % MONO_COLORS.length]
+					const phone = s.phoneNumber ? '+'+s.phoneNumber : '—'
+					const card = document.createElement('div'); card.className='card'
 					card.innerHTML = `
-						<div class="row">
-							<h3>${escapeHtml(s.name)}</h3>
-							<span class="badge ${s.status}">${STATUS_LABEL[s.status] || s.status}</span>
+						<div class="card-top">
+							<div class="mono" style="background:${color}">${esc((s.name||s.id)[0].toUpperCase())}</div>
+							<div class="who"><h3>${esc(s.name)}</h3><div class="sub">${esc(s.id)}</div></div>
+							<span class="pill ${s.status}"><span class="d"></span>${STATUS[s.status]||s.status}</span>
 						</div>
-						<div class="muted">ID: ${escapeHtml(s.id)}</div>
-						<div class="muted">Número: ${escapeHtml(phone)} ${s.pushName ? '· ' + escapeHtml(s.pushName) : ''}</div>
-						<div class="muted">Webhook: ${s.webhookUrl ? escapeHtml(s.webhookUrl) : '<i>não configurado</i>'}</div>
-						<div class="actions"></div>
-					`
-					const actions = card.querySelector('.actions')
-					if (s.status !== 'open') {
-						actions.appendChild(mkBtn('Conectar / QR', 'primary', () => openQr(s.id, s.name)))
-					}
-					actions.appendChild(mkBtn('Reiniciar', '', () => act(`/sessions/${s.id}/restart`, 'POST', 'Reiniciando…')))
-					actions.appendChild(mkBtn('Editar', '', () => openEdit(s)))
-					if (s.status === 'open') {
-						actions.appendChild(mkBtn('Desconectar', 'danger', () => act(`/sessions/${s.id}/logout`, 'POST', 'Desconectando…')))
-					}
-					actions.appendChild(mkBtn('Excluir', 'danger ghost', async () => {
-						if (!confirm(`Excluir a sessão "${s.name}"? Isso remove as credenciais do disco.`)) return
-						await api(`/sessions/${s.id}`, { method: 'DELETE' })
-						toast('Sessão excluída'); load()
-					}))
+						<div class="meta">
+							<div class="row">${svg(ICON.phone)}<span class="val"><b>${esc(phone)}</b>${s.pushName?' · '+esc(s.pushName):''}</span></div>
+							<div class="row">${svg(ICON.hook)}<span class="val">${s.webhookUrl?esc(s.webhookUrl):'<span style="color:var(--faint)">sem webhook</span>'}</span></div>
+						</div>
+						<div class="card-actions"></div>`
+					const acts = card.querySelector('.card-actions')
+					if (s.status !== 'open') acts.appendChild(mkBtn('Conectar', 'primary', ICON.qr, ()=>openQr(s.id, s.name)))
+					acts.appendChild(mkBtn('Reiniciar','', ICON.refresh, ()=>act(`/sessions/${s.id}/restart`,'POST','Reiniciando…')))
+					acts.appendChild(mkBtn('Editar','', ICON.edit, ()=>openEdit(s)))
+					if (s.status === 'open') acts.appendChild(mkBtn('Sair','danger', ICON.power, ()=>act(`/sessions/${s.id}/logout`,'POST','Desconectando…')))
+					acts.appendChild(mkBtn('Excluir','danger ghost', ICON.trash, async()=>{ if(!confirm(`Excluir a sessão "${s.name}"? Isso remove as credenciais do disco.`))return; await api(`/sessions/${s.id}`,{method:'DELETE'}); toast('Sessão excluída'); loadSessions() }))
 					grid.appendChild(card)
 				})
 			}
+			const mkBtn = (label, cls, icon, onclick) => { const b=document.createElement('button'); b.className='btn sm '+cls; b.innerHTML=svg(icon)+esc(label); b.onclick=onclick; return b }
+			const act = async (path, method, msg) => { try{ await api(path,{method}); toast(msg); loadSessions() }catch(e){ toast('Erro: '+e.message,false) } }
 
-			const mkBtn = (label, cls, onclick) => {
-				const b = document.createElement('button')
-				b.textContent = label; if (cls) b.className = cls; b.onclick = onclick
-				return b
+			const loadSessions = async () => {
+				try { const { sessions } = await api('/sessions'); renderSessions(sessions) }
+				catch (e) { $('#grid').innerHTML = `<div class="empty">Erro ao carregar: ${esc(e.message)}</div>` }
 			}
-			const act = async (path, method, msg) => {
-				try { await api(path, { method }); toast(msg); load() }
-				catch (e) { toast('Erro: ' + e.message) }
-			}
-			const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))
 
-			let currentEs = null
+			/* ---------- QR flow ---------- */
+			let es = null
 			const openQr = (id, name) => {
-				const dlg = document.getElementById('dlg-qr')
-				document.getElementById('qr-title').textContent = 'Conectar · ' + name
-				const body = document.getElementById('qr-body')
-				body.innerHTML = '<div class="spin"></div><div class="muted">Aguardando QR…</div>'
-				dlg.showModal()
-
-				currentEs = new EventSource(`/api/sessions/${id}/events`)
-				currentEs.onmessage = (e) => {
+				$('#qr-title').childNodes[0].nodeValue = 'Conectar · '+name+' '
+				const body = $('#qr-body'); body.innerHTML = '<div class="spin"></div><div class="qr-hint">Aguardando QR…</div>'
+				$('#dlg-qr').showModal()
+				es = new EventSource(`/api/sessions/${id}/events`)
+				es.onmessage = e => {
 					const { info, qr } = JSON.parse(e.data)
-					if (info.status === 'open') {
-						body.innerHTML = `<div style="font-size:42px">✅</div><div><b>Conectado!</b></div><div class="muted">${escapeHtml('+' + (info.phoneNumber||''))}</div>`
-						load()
-						setTimeout(() => { closeQr(); }, 1500)
-					} else if (qr.qrImage) {
-						body.innerHTML = `<img src="${qr.qrImage}" alt="QR code" /><div class="muted">Abra o WhatsApp → Aparelhos conectados → Conectar aparelho</div>`
-					} else if (info.status === 'logged_out') {
-						body.innerHTML = '<div class="muted">Sessão deslogada. Reinicie para gerar um novo QR.</div>'
-					} else {
-						body.innerHTML = `<div class="spin"></div><div class="muted">${STATUS_LABEL[info.status] || info.status}…</div>`
-					}
-				}
-				currentEs.onerror = () => { /* auto-reconnects */ }
-			}
-			const closeQr = () => {
-				if (currentEs) { currentEs.close(); currentEs = null }
-				document.getElementById('dlg-qr').close()
-				load()
-			}
-			document.getElementById('qr-close').onclick = closeQr
-			document.getElementById('dlg-qr').addEventListener('close', () => { if (currentEs) { currentEs.close(); currentEs = null } })
-
-			// New session dialog
-			const dlgNew = document.getElementById('dlg-new')
-			document.getElementById('btn-new').onclick = () => {
-				dlgNew.querySelector('form').reset()
-				chipRow(document.getElementById('new-events'), ['connection.update', 'messages.upsert'])
-				dlgNew.showModal()
-			}
-			dlgNew.querySelector('form').addEventListener('submit', async (e) => {
-				if (e.submitter?.value !== 'ok') return
-				e.preventDefault()
-				const f = e.target
-				try {
-					const s = await api('/sessions', { method: 'POST', body: JSON.stringify({
-						id: f.id.value.trim() || undefined,
-						name: f.name.value.trim() || undefined,
-						webhookUrl: f.webhookUrl.value.trim() || undefined,
-						webhookEvents: readChips(document.getElementById('new-events'))
-					}) })
-					dlgNew.close(); toast('Sessão criada'); load()
-					openQr(s.id, s.name)
-				} catch (err) { toast('Erro: ' + err.message) }
-			})
-
-			// Edit dialog
-			const dlgEdit = document.getElementById('dlg-edit')
-			const openEdit = (s) => {
-				const f = dlgEdit.querySelector('form')
-				f.id.value = s.id; f.name.value = s.name; f.webhookUrl.value = s.webhookUrl || ''
-				chipRow(document.getElementById('edit-events'), s.webhookEvents || [])
-				dlgEdit.showModal()
-			}
-			dlgEdit.querySelector('form').addEventListener('submit', async (e) => {
-				if (e.submitter?.value !== 'ok') return
-				e.preventDefault()
-				const f = e.target
-				try {
-					await api(`/sessions/${f.id.value}`, { method: 'PATCH', body: JSON.stringify({
-						name: f.name.value.trim(),
-						webhookUrl: f.webhookUrl.value.trim(),
-						webhookEvents: readChips(document.getElementById('edit-events'))
-					}) })
-					dlgEdit.close(); toast('Sessão atualizada'); load()
-				} catch (err) { toast('Erro: ' + err.message) }
-			})
-
-			const load = async () => {
-				try {
-					const { sessions } = await api('/sessions')
-					render(sessions)
-				} catch (e) {
-					document.getElementById('grid').innerHTML =
-						`<div class="empty">Erro ao carregar: ${escapeHtml(e.message)}</div>`
+					if (info.status === 'open') { body.innerHTML = `<div class="ok-check">${svg('<path d="M20 6L9 17l-5-5"/>')}</div><div><b>Conectado!</b></div><div class="qr-hint">+${esc(info.phoneNumber||'')}</div>`; loadSessions(); setTimeout(closeQr, 1400) }
+					else if (qr.qrImage) body.innerHTML = `<img src="${qr.qrImage}" alt="QR" /><div class="qr-hint">WhatsApp → <b>Aparelhos conectados</b> → <b>Conectar aparelho</b> e aponte para o código.</div>`
+					else if (info.status === 'logged_out') body.innerHTML = '<div class="qr-hint">Sessão deslogada. Reinicie para gerar um novo QR.</div>'
+					else body.innerHTML = `<div class="spin"></div><div class="qr-hint">${STATUS[info.status]||info.status}…</div>`
 				}
 			}
+			const closeQr = () => { if(es){es.close();es=null} $('#dlg-qr').close(); loadSessions() }
+			$('#qr-close').onclick = closeQr
+			$('#dlg-qr').addEventListener('close', ()=>{ if(es){es.close();es=null} })
 
-			load()
-			setInterval(load, 8000)
+			/* ---------- dialogs new/edit ---------- */
+			document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close())
+			const dNew = $('#dlg-new')
+			$('#btn-new').onclick = () => { dNew.querySelector('form').reset(); chips($('#new-events'), ['connection.update','messages.upsert']); dNew.showModal() }
+			dNew.querySelector('form').addEventListener('submit', async e => {
+				if (e.submitter?.value !== 'ok') return
+				e.preventDefault(); const f = e.target
+				try { const s = await api('/sessions',{method:'POST',body:JSON.stringify({ id:f.id.value.trim()||undefined, name:f.name.value.trim()||undefined, webhookUrl:f.webhookUrl.value.trim()||undefined, webhookEvents:readChips($('#new-events')) })}); dNew.close(); toast('Sessão criada'); loadSessions(); openQr(s.id, s.name) }
+				catch (err) { toast('Erro: '+err.message, false) }
+			})
+			const dEdit = $('#dlg-edit')
+			const openEdit = s => { const f=dEdit.querySelector('form'); f.id.value=s.id; f.name.value=s.name; f.webhookUrl.value=s.webhookUrl||''; chips($('#edit-events'), s.webhookEvents||[]); dEdit.showModal() }
+			dEdit.querySelector('form').addEventListener('submit', async e => {
+				if (e.submitter?.value !== 'ok') return
+				e.preventDefault(); const f = e.target
+				try { await api(`/sessions/${f.id.value}`,{method:'PATCH',body:JSON.stringify({ name:f.name.value.trim(), webhookUrl:f.webhookUrl.value.trim(), webhookEvents:readChips($('#edit-events')) })}); dEdit.close(); toast('Sessão atualizada'); loadSessions() }
+				catch (err) { toast('Erro: '+err.message, false) }
+			})
+
+			/* ---------- apps ---------- */
+			const loadApps = async () => {
+				try {
+					const { apps } = await api('/system/apps')
+					$('#apps-body').innerHTML = apps.length ? apps.map(a => `<tr>
+						<td><b>App #${a.id}</b></td>
+						<td><code class="key">${esc(a.masked)}</code></td>
+						<td>${a.count.toLocaleString('pt-BR')}</td>
+						<td>${esc(ago(a.lastUsedAt))}</td>
+						<td style="color:var(--muted)">${esc(a.lastIp||'—')}</td></tr>`).join('')
+						: `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:30px">Nenhuma chave configurada em API_KEYS.</td></tr>`
+				} catch (e) { $('#apps-body').innerHTML = `<tr><td colspan="5" style="color:var(--red)">Erro: ${esc(e.message)}</td></tr>` }
+			}
+
+			/* ---------- health ---------- */
+			const loadHealth = async () => {
+				const el = $('#health'); el.innerHTML = '<div class="hcard"><div class="spin"></div></div>'
+				try {
+					const h = await api('/system/health')
+					const diskPct = h.storage.diskTotalBytes ? Math.round((1 - h.storage.diskFreeBytes/h.storage.diskTotalBytes)*100) : null
+					const memPct = Math.round(h.memory.heapUsedBytes / h.memory.heapTotalBytes * 100)
+					el.innerHTML = `
+						<div class="hcard"><div class="h">${svg('<path d="M12 7v5l3 2"/><circle cx="12" cy="12" r="9"/>')} Uptime</div><div class="v">${dur(h.uptimeSeconds)}</div><div class="vsub">desde ${new Date(h.startedAt).toLocaleString('pt-BR')}</div></div>
+						<div class="hcard"><div class="h">${svg('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/>')} Memória</div><div class="v">${bytes(h.memory.rssBytes)}</div><div class="vsub">heap ${bytes(h.memory.heapUsedBytes)} / ${bytes(h.memory.heapTotalBytes)}</div><div class="bar"><i style="width:${memPct}%"></i></div></div>
+						<div class="hcard"><div class="h">${svg('<path d="M4 6h16v5H4zM4 13h16v5H4z"/><path d="M7 8.5h.01M7 15.5h.01"/>')} Armazenamento</div><div class="v">${bytes(h.storage.usedBytes)}</div><div class="vsub">sessões em disco${diskPct!=null?` · disco ${diskPct}% usado (${bytes(h.storage.diskFreeBytes)} livre)`:''}</div>${diskPct!=null?`<div class="bar"><i style="width:${diskPct}%"></i></div>`:''}</div>
+						<div class="hcard"><div class="h">${svg('<path d="M4 5h16v6H4zM4 15h16v4H4z"/>')} Sessões</div><div class="v">${h.sessions.connected}/${h.sessions.total}</div><div class="vsub">conectadas / total</div></div>
+						<div class="hcard"><div class="h">${svg('<path d="M12 3l8 4v5c0 5-4 8-8 9-4-1-8-4-8-9V7z"/>')} Cloudflare Access</div><div class="v" style="color:${h.cloudflare?'var(--accent-2)':'var(--amber)'}">${h.cloudflare?'Ativo':'Inativo'}</div><div class="vsub">verificação de JWT na origem</div></div>
+						<div class="hcard"><div class="h">${svg('<path d="M6 3h9l3 3v15H6z"/><path d="M9 12h6M9 16h6"/>')} Runtime</div><div class="kv"><span class="k">Node</span><span class="v2">${esc(h.node)}</span></div><div class="kv"><span class="k">Plataforma</span><span class="v2">${esc(h.platform)}</span></div></div>`
+				} catch (e) { el.innerHTML = `<div class="empty" style="grid-column:1/-1">Erro: ${esc(e.message)}</div>` }
+			}
+			$('#btn-refresh-health').onclick = loadHealth
+
+			/* ---------- updates ---------- */
+			let cloudflareOn = false
+			const renderUpdates = (u) => {
+				const body = $('#upd-body')
+				if (u.error && !u.upstream) { body.innerHTML = `<div class="qr-hint" style="max-width:none">Não foi possível consultar: ${esc(u.error)}</div>`; return }
+				const badge = u.updateAvailable
+					? `<span class="upd-badge up">${svg('<path d="M12 3v12M7 10l5 5 5-5"/>')} Atualização disponível</span>`
+					: `<span class="upd-badge ok">${svg('<path d="M20 6L9 17l-5-5"/>')} Em dia</span>`
+				body.innerHTML = `
+					<div style="display:flex;justify-content:center;margin-bottom:6px">${badge}</div>
+					<div class="upd-row"><div style="flex:1"><div style="color:var(--muted);font-size:12px">Versão instalada</div><b>${esc(u.current)}</b></div>
+					<div style="flex:1"><div style="color:var(--muted);font-size:12px">Upstream (${esc(u.branch)})</div><b>${esc(u.upstream||'—')}</b></div></div>
+					${u.latestRelease?`<div class="upd-row"><span style="color:var(--muted)">Último release</span><a href="${esc(u.latestRelease.url)}" target="_blank" rel="noopener">${esc(u.latestRelease.tag)}</a>${u.latestRelease.publishedAt?`<span style="color:var(--faint);font-size:12px">${new Date(u.latestRelease.publishedAt).toLocaleDateString('pt-BR')}</span>`:''}</div>`:''}
+					${u.lastCommit?`<div class="upd-row"><span style="color:var(--muted)">Último commit</span><a href="${esc(u.lastCommit.url)}" target="_blank" rel="noopener"><code class="key">${esc(u.lastCommit.shortSha)}</code></a><span style="color:var(--faint);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.lastCommit.message||'')}</span></div>`:''}
+					<div style="color:var(--muted);font-size:12.5px;margin-top:6px">Fonte: <a href="https://github.com/${esc(u.repo)}" target="_blank" rel="noopener">${esc(u.repo)}</a> · verificado ${esc(ago(u.checkedAt))}</div>
+					${u.updateAvailable?`<div style="margin-top:8px"><div style="color:var(--muted);font-size:12.5px;margin-bottom:6px">Para atualizar na VPS:</div><pre class="cmd">cd /opt/baileys-server
+git fetch upstream && git merge upstream/${esc(u.branch)}
+cd server && docker compose up -d --build</pre><div style="color:var(--faint);font-size:12px;margin-top:6px">(configure o remote uma vez: <code class="key">git remote add upstream https://github.com/${esc(u.repo)}.git</code>)</div></div>`:''}`
+			}
+			const loadUpdates = async (force) => {
+				try { const u = await api('/system/updates'+(force?'?refresh=1':'')); renderUpdates(u); $('#upd-dot').style.display = u.updateAvailable ? 'grid' : 'none' }
+				catch (e) { $('#upd-body').innerHTML = `<div class="qr-hint">Erro: ${esc(e.message)}</div>` }
+			}
+			$('#btn-updates').onclick = () => { $('#dlg-upd').showModal(); $('#upd-body').innerHTML='<div class="qr-box"><div class="spin"></div><div class="qr-hint">Consultando o GitHub…</div></div>'; loadUpdates(false) }
+			$('#upd-refresh').onclick = () => { $('#upd-body').innerHTML='<div class="qr-box"><div class="spin"></div><div class="qr-hint">Consultando o GitHub…</div></div>'; loadUpdates(true) }
+			document.querySelectorAll('[data-close-upd]').forEach(b => b.onclick = () => $('#dlg-upd').close())
+
+			/* ---------- boot ---------- */
+			const boot = async () => {
+				buildNav(); go('sessions')
+				try {
+					const info = await api('/system/info')
+					cloudflareOn = info.cloudflare
+					const email = info.user || (info.principal==='anonymous' ? 'modo dev (sem auth)' : '—')
+					$('#user-email').textContent = email
+					$('#user-av').textContent = (info.user||'?')[0].toUpperCase()
+				} catch {}
+				loadSessions()
+				loadUpdates(false)
+				setInterval(() => { if (current === 'sessions') loadSessions() }, 8000)
+			}
+			boot()
 		</script>
 	</body>
 </html>

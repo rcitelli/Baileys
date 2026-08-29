@@ -2,7 +2,9 @@ import { Boom } from '@hapi/boom'
 import { type AnyMessageContent, isJidGroup } from '../wa.js'
 import { type Request, type Response, Router } from 'express'
 import type { SessionManager } from '../sessions/manager.js'
+import { checkUpdates, getCurrentVersion, getHealth, listApiClients } from '../system.js'
 import type { WebhookEvent } from '../types.js'
+import { cloudflareConfigured } from './auth.js'
 import { sensitiveLimiter } from './security.js'
 
 type Handler = (req: Request, res: Response) => Promise<unknown> | unknown
@@ -36,6 +38,52 @@ const toJid = (input: string): string => {
 
 export const createApiRouter = (manager: SessionManager): Router => {
 	const router = Router()
+
+	// ---- System / platform -------------------------------------------------
+
+	router.get(
+		'/system/info',
+		asyncHandler(async (req, res) => {
+			res.json({
+				user: req.principal?.email ?? null,
+				principal: req.principal?.kind ?? 'unknown',
+				version: await getCurrentVersion(),
+				cloudflare: cloudflareConfigured,
+				sessions: manager.list().length
+			})
+		})
+	)
+
+	router.get(
+		'/system/health',
+		asyncHandler(async (_req, res) => {
+			const sessions = manager.list().map(s => s.getInfo())
+			const byStatus: Record<string, number> = {}
+			for (const s of sessions) {
+				byStatus[s.status] = (byStatus[s.status] ?? 0) + 1
+			}
+
+			res.json({
+				...(await getHealth()),
+				cloudflare: cloudflareConfigured,
+				sessions: { total: sessions.length, byStatus, connected: byStatus.open ?? 0 }
+			})
+		})
+	)
+
+	router.get(
+		'/system/updates',
+		asyncHandler(async (req, res) => {
+			res.json(await checkUpdates(req.query.refresh === '1'))
+		})
+	)
+
+	router.get(
+		'/system/apps',
+		asyncHandler((_req, res) => {
+			res.json({ apps: listApiClients() })
+		})
+	)
 
 	router.get(
 		'/sessions',

@@ -3,6 +3,7 @@ import type { NextFunction, Request, Response } from 'express'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { config } from '../config.js'
 import { logger } from '../logger.js'
+import { recordApiKeyUse } from '../system.js'
 
 export interface Principal {
 	kind: 'service' | 'user' | 'anonymous'
@@ -51,20 +52,23 @@ const extractApiKey = (req: Request): string | undefined => {
 	return req.header('x-api-key')?.trim() || undefined
 }
 
-/** Constant-time membership test — avoids leaking which/how-many keys match via timing. */
-const isValidApiKey = (provided: string): boolean => {
+/**
+ * Constant-time membership test — avoids leaking which/how-many keys match via timing.
+ * Returns the index of the matching key, or -1.
+ */
+const matchApiKeyIndex = (provided: string): number => {
 	const a = Buffer.from(provided)
-	let matched = false
-	for (const key of config.auth.apiKeys) {
+	let match = -1
+	config.auth.apiKeys.forEach((key, index) => {
 		const b = Buffer.from(key)
 		// timingSafeEqual requires equal lengths; only compare when they match, but keep
 		// iterating every key so total work doesn't depend on where the match is.
 		if (a.length === b.length && timingSafeEqual(a, b)) {
-			matched = true
+			match = index
 		}
-	}
+	})
 
-	return matched
+	return match
 }
 
 const verifyApiKey = (req: Request): Principal | undefined => {
@@ -73,8 +77,14 @@ const verifyApiKey = (req: Request): Principal | undefined => {
 	}
 
 	const key = extractApiKey(req)
-	if (key && isValidApiKey(key)) {
-		return { kind: 'service', id: 'api-key' }
+	if (!key) {
+		return undefined
+	}
+
+	const index = matchApiKeyIndex(key)
+	if (index >= 0) {
+		recordApiKeyUse(index, clientIp(req))
+		return { kind: 'service', id: `api-key-${index + 1}` }
 	}
 
 	return undefined
