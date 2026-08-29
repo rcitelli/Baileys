@@ -40,13 +40,20 @@ o `Dockerfile` faz isso automaticamente.
 ```bash
 cd server
 cp .env.example .env
-# edite .env: defina API_KEYS e, em produção, CF_ACCESS_TEAM_DOMAIN + CF_ACCESS_AUD
+# edite .env: defina API_KEYS, PANEL_HOSTNAME e, em produção, CF_ACCESS_TEAM_DOMAIN + CF_ACCESS_AUD
+
+# só o servidor (API em 127.0.0.1:3000 para as apps da mesma VPS):
 docker compose up -d --build
+
+# servidor + Cloudflare Tunnel (expõe só o painel, sem porta aberta na internet):
+TUNNEL_TOKEN=... docker compose --profile tunnel up -d --build
 ```
 
-O servidor sobe em `127.0.0.1:3000` (apenas localhost — coloque o Cloudflare Tunnel ou um
-reverse proxy na frente). Os dados das sessões ficam em `server/data/` (volume). Faça backup
-dessa pasta para não perder as conexões.
+O servidor escuta em `127.0.0.1:3000` (apenas loopback). Suas apps na mesma VPS que rodam
+como processo (uv/PHP) acessam por `http://127.0.0.1:3000`; apps em container entram na rede
+`baileys-net` e usam `http://baileys-server:3000`. O painel é exposto **só** pelo Cloudflare
+Tunnel (perfil `tunnel`), sem abrir porta na VPS. Os dados das sessões ficam em `server/data/`
+(volume) — faça backup dessa pasta.
 
 ## Rodando local (desenvolvimento)
 
@@ -186,7 +193,34 @@ Como o `server/` consome a lib pela saída compilada (`../lib`), após um merge 
 
 ## Segurança
 
-- Nunca exponha a porta diretamente na internet — use Cloudflare Tunnel/Access ou reverse proxy.
-- Trate `data/` como segredo: contém as credenciais das sessões do WhatsApp.
-- Este projeto herda a política de uso responsável do Baileys (sem spam/abuso). Veja
-  `CODE_OF_CONDUCT.md` e `SECURITY.md` na raiz.
+Defesa em profundidade — nenhuma camada é confiada sozinha:
+
+**Rede**
+- A origem não fica exposta: use **Cloudflare Tunnel** (perfil `tunnel`) — o `cloudflared`
+  faz conexão de saída, sem abrir porta de entrada na VPS.
+- A API escuta só em `127.0.0.1` / rede Docker interna — nunca publique em `0.0.0.0`.
+- **Firewall na VPS**: mantenha default-deny de entrada, liberando só o SSH (de preferência
+  também atrás do Cloudflare/WARP). O Tunnel dispensa abrir 80/443.
+
+**Identidade e autenticação**
+- **Painel**: Cloudflare Access (login OTP/IdP). O servidor **verifica o JWT** do Access na
+  origem (`CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD`) — não confia só na borda.
+- Defina `PANEL_HOSTNAME`: no hostname público, uma API Key sozinha é **recusada** — só passa
+  usuário do Access. As apps usam `127.0.0.1`/rede Docker com API Key.
+- **Apps**: uma `API_KEYS` por aplicação; comparação em tempo constante (anti-timing).
+  Se uma chave vazar, revogue só ela.
+
+**Aplicação**
+- Cabeçalhos de segurança (helmet): CSP, `X-Frame-Options`/`frame-ancestors` (anti-clickjacking),
+  `nosniff`, HSTS.
+- **Rate limiting** no `/api`, com limite mais estrito em criar sessão e enviar mensagem.
+- Tentativas de autenticação falhas são logadas (IP via `CF-Connecting-IP`).
+
+**Segredos e dados**
+- Trate `data/` como segredo: são as credenciais vivas das sessões do WhatsApp. Backup
+  criptografado, permissão restrita, fora do Git (já bloqueado).
+- Rotacione `API_KEYS` e `WEBHOOK_SECRET` periodicamente; nunca commite o `.env`.
+- Valide o `X-Webhook-Secret` no destino dos webhooks.
+
+Este projeto herda a política de uso responsável do Baileys (sem spam/abuso). Veja
+`CODE_OF_CONDUCT.md` e `SECURITY.md` na raiz.

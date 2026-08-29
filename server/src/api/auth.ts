@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { config } from '../config.js'
@@ -50,17 +51,47 @@ const extractApiKey = (req: Request): string | undefined => {
 	return req.header('x-api-key')?.trim() || undefined
 }
 
+/** Constant-time membership test — avoids leaking which/how-many keys match via timing. */
+const isValidApiKey = (provided: string): boolean => {
+	const a = Buffer.from(provided)
+	let matched = false
+	for (const key of config.auth.apiKeys) {
+		const b = Buffer.from(key)
+		// timingSafeEqual requires equal lengths; only compare when they match, but keep
+		// iterating every key so total work doesn't depend on where the match is.
+		if (a.length === b.length && timingSafeEqual(a, b)) {
+			matched = true
+		}
+	}
+
+	return matched
+}
+
 const verifyApiKey = (req: Request): Principal | undefined => {
 	if (config.auth.apiKeys.length === 0) {
 		return undefined
 	}
 
 	const key = extractApiKey(req)
-	if (key && config.auth.apiKeys.includes(key)) {
+	if (key && isValidApiKey(key)) {
 		return { kind: 'service', id: 'api-key' }
 	}
 
 	return undefined
+}
+
+/** Real client IP for logging — prefer Cloudflare's header, fall back to the socket. */
+const clientIp = (req: Request): string =>
+	req.header('cf-connecting-ip') || req.ip || req.socket.remoteAddress || 'unknown'
+
+/** True when the request arrived on the public panel hostname (through Cloudflare). */
+const isPublicHostname = (req: Request): boolean => {
+	if (!config.auth.panelHostname) {
+		return false
+	}
+
+	const host = (req.header('host') || '').toLowerCase().replace(/:\d+$/, '')
+	return host === config.auth.panelHostname
 }
 
 const verifyCloudflare = async (req: Request): Promise<Principal | undefined> => {
@@ -98,6 +129,21 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		return
 	}
 
+	// On the public panel hostname, require a Cloudflare Access user — never accept a
+	// bare API key from the internet, so a leaked key can't be used from outside.
+	if (isPublicHostname(req)) {
+		const cfUser = await verifyCloudflare(req)
+		if (cfUser) {
+			req.principal = cfUser
+			next()
+			return
+		}
+
+		logger.warn({ ip: clientIp(req), path: req.path, host: req.header('host') }, 'rejected API-key/anon on public hostname')
+		res.status(401).json({ error: 'unauthorized', message: 'Cloudflare Access session required on this hostname' })
+		return
+	}
+
 	const principal = verifyApiKey(req) ?? (await verifyCloudflare(req))
 	if (principal) {
 		req.principal = principal
@@ -105,6 +151,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 		return
 	}
 
+	logger.warn({ ip: clientIp(req), path: req.path }, 'unauthorized API request')
 	res.status(401).json({ error: 'unauthorized', message: 'Valid API key or Cloudflare Access session required' })
 }
 

@@ -10,13 +10,42 @@ services:
     env_file:
       - .env
     ports:
-      # Bind to localhost only — Cloudflare Tunnel / your reverse proxy fronts this.
+      # Loopback only — reachable by apps running as host processes (uv/PHP) via
+      # http://127.0.0.1:3000, never from the internet. Containerized apps should
+      # instead join the `baileys-net` network and use http://baileys-server:3000.
       - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
       - ./data:/app/server/data
+    networks:
+      - baileys-net
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # Cloudflare Tunnel — exposes ONLY the panel to the internet, with no inbound port
+  # open on the VPS. Enable with:  docker compose --profile tunnel up -d
+  # Create the tunnel in the Zero Trust dashboard, route your panel hostname to
+  # http://baileys-server:3000, and put the tunnel token in TUNNEL_TOKEN (.env).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: baileys-cloudflared
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    depends_on:
+      - baileys-server
+    networks:
+      - baileys-net
+
+networks:
+  # Shared network so your other Docker apps can reach the server by name.
+  # In their compose file:
+  #   networks:
+  #     baileys-net:
+  #       external: true
+  # and attach the service to it, then call http://baileys-server:3000.
+  baileys-net:
+    name: baileys-net

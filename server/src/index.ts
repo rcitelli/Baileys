@@ -4,6 +4,7 @@ import cors from 'cors'
 import express from 'express'
 import { authenticate, cloudflareConfigured, requireCloudflareUser } from './api/auth.js'
 import { createApiRouter } from './api/routes.js'
+import { apiLimiter, securityHeaders } from './api/security.js'
 import { config } from './config.js'
 import { logger } from './logger.js'
 import { SessionManager } from './sessions/manager.js'
@@ -16,6 +17,10 @@ const main = async () => {
 
 	const app = express()
 	app.disable('x-powered-by')
+	// Behind Cloudflare Tunnel / a reverse proxy — trust the configured hops so req.ip and
+	// rate-limit keys reflect the real client, not the proxy.
+	app.set('trust proxy', config.trustProxy)
+	app.use(securityHeaders)
 	app.use(cors())
 	app.use(express.json({ limit: '10mb' }))
 
@@ -24,8 +29,8 @@ const main = async () => {
 		res.json({ ok: true, sessions: manager.list().length, cloudflare: cloudflareConfigured })
 	})
 
-	// REST API — API key (server-to-server) or Cloudflare Access (panel) required.
-	app.use('/api', authenticate, createApiRouter(manager))
+	// REST API — rate limited, then API key (server-to-server) or Cloudflare Access (panel).
+	app.use('/api', apiLimiter, authenticate, createApiRouter(manager))
 
 	// Panel — a static single-page dashboard, gated behind Cloudflare Access.
 	app.get('/', requireCloudflareUser, (_req, res) => {

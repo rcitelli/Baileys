@@ -44,7 +44,30 @@ export const config = {
 			teamDomain: process.env.CF_ACCESS_TEAM_DOMAIN?.replace(/\/+$/, '') || undefined,
 			/** Application Audience (AUD) tag from the Cloudflare Access application */
 			aud: process.env.CF_ACCESS_AUD || undefined
-		}
+		},
+		/**
+		 * Public hostname the panel is served on (the Cloudflare Tunnel hostname).
+		 * When set, requests arriving with this Host MUST be a Cloudflare Access user —
+		 * a bare API key is rejected on the public hostname, so a leaked key cannot be
+		 * used from the internet. Machine-to-machine calls use 127.0.0.1 / the Docker
+		 * network instead, where the API key is accepted.
+		 */
+		panelHostname: process.env.PANEL_HOSTNAME?.toLowerCase().replace(/:\d+$/, '') || undefined
+	},
+
+	/**
+	 * Number of proxy hops in front of the app (Cloudflare Tunnel / reverse proxy) to
+	 * trust for X-Forwarded-For. Default 'loopback' — cloudflared runs on the same host.
+	 */
+	trustProxy: process.env.TRUST_PROXY ?? 'loopback',
+
+	rateLimit: {
+		/** Sliding window (ms) for the general API limiter */
+		windowMs: num(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
+		/** Max requests per window per client for the general API */
+		max: num(process.env.RATE_LIMIT_MAX, 120),
+		/** Stricter cap for sensitive actions (session create, message send) per window */
+		sensitiveMax: num(process.env.RATE_LIMIT_SENSITIVE_MAX, 30)
 	},
 
 	webhook: {

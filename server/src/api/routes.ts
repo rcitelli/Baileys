@@ -3,6 +3,7 @@ import { type AnyMessageContent, isJidGroup } from '../wa.js'
 import { type Request, type Response, Router } from 'express'
 import type { SessionManager } from '../sessions/manager.js'
 import type { WebhookEvent } from '../types.js'
+import { sensitiveLimiter } from './security.js'
 
 type Handler = (req: Request, res: Response) => Promise<unknown> | unknown
 
@@ -45,6 +46,7 @@ export const createApiRouter = (manager: SessionManager): Router => {
 
 	router.post(
 		'/sessions',
+		sensitiveLimiter,
 		asyncHandler(async (req, res) => {
 			const { id, name, webhookUrl, webhookEvents } = req.body ?? {}
 			const session = await manager.create({
@@ -155,6 +157,7 @@ export const createApiRouter = (manager: SessionManager): Router => {
 
 	router.post(
 		'/sessions/:id/send-text',
+		sensitiveLimiter,
 		asyncHandler(async (req, res) => {
 			const { to, text, options } = req.body ?? {}
 			if (!to || typeof text !== 'string') {
@@ -168,6 +171,7 @@ export const createApiRouter = (manager: SessionManager): Router => {
 
 	router.post(
 		'/sessions/:id/send',
+		sensitiveLimiter,
 		asyncHandler(async (req, res) => {
 			const { to, message, options } = req.body ?? {}
 			if (!to || !message || typeof message !== 'object') {
