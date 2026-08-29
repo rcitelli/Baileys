@@ -24,3 +24,9 @@ test.ts
 TestData
 wa-logs*
 coverage
+
+# Baileys server (server/) — runtime data & local installs
+server/node_modules
+server/dist
+server/data
+server/.env

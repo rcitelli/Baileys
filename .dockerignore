@@ -1,0 +1,14 @@
+# Build context for server/Dockerfile is the repo root — keep it lean.
+node_modules
+lib
+docs
+Media
+Example
+proto-extract
+.git
+.github
+server/node_modules
+server/data
+server/dist
+server/.env
+**/*.log

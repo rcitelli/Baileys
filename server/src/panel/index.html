@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="pt-BR">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Baileys · Painel de Sessões</title>
+		<style>
+			:root {
+				--bg: #0f1419;
+				--panel: #1a2129;
+				--panel-2: #222b35;
+				--border: #2d3742;
+				--text: #e6edf3;
+				--muted: #8b98a5;
+				--accent: #25d366;
+				--accent-2: #1e9e4f;
+				--danger: #e5534b;
+				--warn: #d99e2b;
+				--radius: 12px;
+			}
+			* { box-sizing: border-box; }
+			body {
+				margin: 0;
+				font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+				background: var(--bg);
+				color: var(--text);
+			}
+			header {
+				display: flex; align-items: center; justify-content: space-between;
+				padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--panel);
+				position: sticky; top: 0; z-index: 10;
+			}
+			header h1 { font-size: 18px; margin: 0; display: flex; align-items: center; gap: 10px; }
+			.logo { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; color: #06251a; font-weight: 800; }
+			.wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+			button {
+				font: inherit; cursor: pointer; border: 1px solid var(--border);
+				background: var(--panel-2); color: var(--text); padding: 8px 14px; border-radius: 9px;
+				transition: background .15s, border-color .15s;
+			}
+			button:hover { background: #2b3742; }
+			button.primary { background: var(--accent); border-color: var(--accent); color: #06251a; font-weight: 700; }
+			button.primary:hover { background: var(--accent-2); }
+			button.danger { color: #ffd7d4; border-color: #55302e; }
+			button.danger:hover { background: #3a2321; }
+			button.ghost { background: transparent; }
+			.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin-top: 20px; }
+			.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+			.card h3 { margin: 0; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+			.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+			.muted { color: var(--muted); font-size: 13px; word-break: break-all; }
+			.badge { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+			.badge.open { background: rgba(37,211,102,.15); color: #4ade80; }
+			.badge.qr, .badge.pairing { background: rgba(217,158,43,.15); color: var(--warn); }
+			.badge.connecting { background: rgba(88,166,255,.15); color: #58a6ff; }
+			.badge.close, .badge.idle { background: rgba(139,152,165,.15); color: var(--muted); }
+			.badge.logged_out { background: rgba(229,83,75,.15); color: var(--danger); }
+			.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+			.actions button { padding: 6px 11px; font-size: 13px; }
+			.empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+			dialog {
+				border: 1px solid var(--border); background: var(--panel); color: var(--text);
+				border-radius: var(--radius); padding: 0; width: min(460px, 92vw);
+			}
+			dialog::backdrop { background: rgba(0,0,0,.6); }
+			.dlg-head { padding: 18px 20px; border-bottom: 1px solid var(--border); font-weight: 700; }
+			.dlg-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+			.dlg-foot { padding: 16px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
+			label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+			input, textarea {
+				font: inherit; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+				border-radius: 8px; padding: 9px 11px; width: 100%;
+			}
+			.qr-box { display: grid; place-items: center; gap: 10px; padding: 8px; }
+			.qr-box img { width: 250px; height: 250px; background: #fff; border-radius: 10px; padding: 8px; }
+			.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+			.chip { font-size: 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; cursor: pointer; user-select: none; }
+			.chip.on { background: rgba(37,211,102,.15); border-color: var(--accent); color: #4ade80; }
+			.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--border); padding: 12px 18px; border-radius: 10px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+			.toast.show { opacity: 1; }
+			.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: sp .8s linear infinite; }
+			@keyframes sp { to { transform: rotate(360deg); } }
+			@media (prefers-color-scheme: light) {
+				:root { --bg:#f5f7fa; --panel:#fff; --panel-2:#eef1f5; --border:#dce1e8; --text:#1a2129; --muted:#5b6773; }
+			}
+		</style>
+	</head>
+	<body>
+		<header>
+			<h1><span class="logo">B</span> Baileys · Painel de Sessões</h1>
+			<div style="display:flex; gap:10px; align-items:center;">
+				<span id="who" class="muted"></span>
+				<button class="primary" id="btn-new">+ Nova sessão</button>
+			</div>
+		</header>
+
+		<div class="wrap">
+			<div id="grid" class="grid"></div>
+			<div id="empty" class="empty" hidden>Nenhuma sessão ainda. Clique em <b>“+ Nova sessão”</b> para conectar um número.</div>
+		</div>
+
+		<dialog id="dlg-new">
+			<form method="dialog">
+				<div class="dlg-head">Nova sessão</div>
+				<div class="dlg-body">
+					<label>ID (opcional, único) <input name="id" placeholder="ex.: vendas, suporte" /></label>
+					<label>Nome <input name="name" placeholder="Ex.: Atendimento Vendas" /></label>
+					<label>Webhook URL (opcional) <input name="webhookUrl" placeholder="https://minha-app.com/webhook" /></label>
+					<label>Eventos enviados ao webhook</label>
+					<div class="chips" id="new-events"></div>
+				</div>
+				<div class="dlg-foot">
+					<button value="cancel" class="ghost">Cancelar</button>
+					<button value="ok" class="primary" id="new-ok">Criar</button>
+				</div>
+			</form>
+		</dialog>
+
+		<dialog id="dlg-qr">
+			<div class="dlg-head" id="qr-title">Conectar</div>
+			<div class="dlg-body">
+				<div class="qr-box" id="qr-body"></div>
+			</div>
+			<div class="dlg-foot">
+				<button class="ghost" id="qr-close">Fechar</button>
+			</div>
+		</dialog>
+
+		<dialog id="dlg-edit">
+			<form method="dialog">
+				<div class="dlg-head">Editar sessão</div>
+				<div class="dlg-body">
+					<input type="hidden" name="id" />
+					<label>Nome <input name="name" /></label>
+					<label>Webhook URL <input name="webhookUrl" placeholder="https://minha-app.com/webhook" /></label>
+					<label>Eventos enviados ao webhook</label>
+					<div class="chips" id="edit-events"></div>
+				</div>
+				<div class="dlg-foot">
+					<button value="cancel" class="ghost">Cancelar</button>
+					<button value="ok" class="primary">Salvar</button>
+				</div>
+			</form>
+		</dialog>
+
+		<div class="toast" id="toast"></div>
+
+		<script>
+			const EVENTS = [
+				'connection.update', 'messages.upsert', 'messages.update', 'messages.delete',
+				'message-receipt.update', 'messages.reaction', 'presence.update',
+				'chats.upsert', 'chats.update', 'contacts.upsert', 'contacts.update',
+				'groups.upsert', 'groups.update', 'call'
+			]
+			const STATUS_LABEL = {
+				idle: 'ocioso', connecting: 'conectando', qr: 'aguardando QR', pairing: 'aguardando código',
+				open: 'conectado', close: 'desconectado', logged_out: 'deslogado'
+			}
+
+			const api = async (path, opts = {}) => {
+				const res = await fetch('/api' + path, {
+					headers: { 'Content-Type': 'application/json' },
+					...opts
+				})
+				if (res.status === 204) return null
+				const data = await res.json().catch(() => ({}))
+				if (!res.ok) throw new Error(data.message || res.statusText)
+				return data
+			}
+
+			const toast = (msg) => {
+				const t = document.getElementById('toast')
+				t.textContent = msg; t.classList.add('show')
+				setTimeout(() => t.classList.remove('show'), 2600)
+			}
+
+			const chipRow = (container, selected) => {
+				container.innerHTML = ''
+				EVENTS.forEach(ev => {
+					const c = document.createElement('span')
+					c.className = 'chip' + (selected.includes(ev) ? ' on' : '')
+					c.textContent = ev
+					c.onclick = () => c.classList.toggle('on')
+					container.appendChild(c)
+				})
+			}
+			const readChips = (container) =>
+				[...container.querySelectorAll('.chip.on')].map(c => c.textContent)
+
+			const render = (sessions) => {
+				const grid = document.getElementById('grid')
+				document.getElementById('empty').hidden = sessions.length > 0
+				grid.innerHTML = ''
+				sessions.forEach(s => {
+					const card = document.createElement('div')
+					card.className = 'card'
+					const phone = s.phoneNumber ? '+' + s.phoneNumber : '—'
+					card.innerHTML = `
+						<div class="row">
+							<h3>${escapeHtml(s.name)}</h3>
+							<span class="badge ${s.status}">${STATUS_LABEL[s.status] || s.status}</span>
+						</div>
+						<div class="muted">ID: ${escapeHtml(s.id)}</div>
+						<div class="muted">Número: ${escapeHtml(phone)} ${s.pushName ? '· ' + escapeHtml(s.pushName) : ''}</div>
+						<div class="muted">Webhook: ${s.webhookUrl ? escapeHtml(s.webhookUrl) : '<i>não configurado</i>'}</div>
+						<div class="actions"></div>
+					`
+					const actions = card.querySelector('.actions')
+					if (s.status !== 'open') {
+						actions.appendChild(mkBtn('Conectar / QR', 'primary', () => openQr(s.id, s.name)))
+					}
+					actions.appendChild(mkBtn('Reiniciar', '', () => act(`/sessions/${s.id}/restart`, 'POST', 'Reiniciando…')))
+					actions.appendChild(mkBtn('Editar', '', () => openEdit(s)))
+					if (s.status === 'open') {
+						actions.appendChild(mkBtn('Desconectar', 'danger', () => act(`/sessions/${s.id}/logout`, 'POST', 'Desconectando…')))
+					}
+					actions.appendChild(mkBtn('Excluir', 'danger ghost', async () => {
+						if (!confirm(`Excluir a sessão "${s.name}"? Isso remove as credenciais do disco.`)) return
+						await api(`/sessions/${s.id}`, { method: 'DELETE' })
+						toast('Sessão excluída'); load()
+					}))
+					grid.appendChild(card)
+				})
+			}
+
+			const mkBtn = (label, cls, onclick) => {
+				const b = document.createElement('button')
+				b.textContent = label; if (cls) b.className = cls; b.onclick = onclick
+				return b
+			}
+			const act = async (path, method, msg) => {
+				try { await api(path, { method }); toast(msg); load() }
+				catch (e) { toast('Erro: ' + e.message) }
+			}
+			const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]))
+
+			let currentEs = null
+			const openQr = (id, name) => {
+				const dlg = document.getElementById('dlg-qr')
+				document.getElementById('qr-title').textContent = 'Conectar · ' + name
+				const body = document.getElementById('qr-body')
+				body.innerHTML = '<div class="spin"></div><div class="muted">Aguardando QR…</div>'
+				dlg.showModal()
+
+				currentEs = new EventSource(`/api/sessions/${id}/events`)
+				currentEs.onmessage = (e) => {
+					const { info, qr } = JSON.parse(e.data)
+					if (info.status === 'open') {
+						body.innerHTML = `<div style="font-size:42px">✅</div><div><b>Conectado!</b></div><div class="muted">${escapeHtml('+' + (info.phoneNumber||''))}</div>`
+						load()
+						setTimeout(() => { closeQr(); }, 1500)
+					} else if (qr.qrImage) {
+						body.innerHTML = `<img src="${qr.qrImage}" alt="QR code" /><div class="muted">Abra o WhatsApp → Aparelhos conectados → Conectar aparelho</div>`
+					} else if (info.status === 'logged_out') {
+						body.innerHTML = '<div class="muted">Sessão deslogada. Reinicie para gerar um novo QR.</div>'
+					} else {
+						body.innerHTML = `<div class="spin"></div><div class="muted">${STATUS_LABEL[info.status] || info.status}…</div>`
+					}
+				}
+				currentEs.onerror = () => { /* auto-reconnects */ }
+			}
+			const closeQr = () => {
+				if (currentEs) { currentEs.close(); currentEs = null }
+				document.getElementById('dlg-qr').close()
+				load()
+			}
+			document.getElementById('qr-close').onclick = closeQr
+			document.getElementById('dlg-qr').addEventListener('close', () => { if (currentEs) { currentEs.close(); currentEs = null } })
+
+			// New session dialog
+			const dlgNew = document.getElementById('dlg-new')
+			document.getElementById('btn-new').onclick = () => {
+				dlgNew.querySelector('form').reset()
+				chipRow(document.getElementById('new-events'), ['connection.update', 'messages.upsert'])
+				dlgNew.showModal()
+			}
+			dlgNew.querySelector('form').addEventListener('submit', async (e) => {
+				if (e.submitter?.value !== 'ok') return
+				e.preventDefault()
+				const f = e.target
+				try {
+					const s = await api('/sessions', { method: 'POST', body: JSON.stringify({
+						id: f.id.value.trim() || undefined,
+						name: f.name.value.trim() || undefined,
+						webhookUrl: f.webhookUrl.value.trim() || undefined,
+						webhookEvents: readChips(document.getElementById('new-events'))
+					}) })
+					dlgNew.close(); toast('Sessão criada'); load()
+					openQr(s.id, s.name)
+				} catch (err) { toast('Erro: ' + err.message) }
+			})
+
+			// Edit dialog
+			const dlgEdit = document.getElementById('dlg-edit')
+			const openEdit = (s) => {
+				const f = dlgEdit.querySelector('form')
+				f.id.value = s.id; f.name.value = s.name; f.webhookUrl.value = s.webhookUrl || ''
+				chipRow(document.getElementById('edit-events'), s.webhookEvents || [])
+				dlgEdit.showModal()
+			}
+			dlgEdit.querySelector('form').addEventListener('submit', async (e) => {
+				if (e.submitter?.value !== 'ok') return
+				e.preventDefault()
+				const f = e.target
+				try {
+					await api(`/sessions/${f.id.value}`, { method: 'PATCH', body: JSON.stringify({
+						name: f.name.value.trim(),
+						webhookUrl: f.webhookUrl.value.trim(),
+						webhookEvents: readChips(document.getElementById('edit-events'))
+					}) })
+					dlgEdit.close(); toast('Sessão atualizada'); load()
+				} catch (err) { toast('Erro: ' + err.message) }
+			})
+
+			const load = async () => {
+				try {
+					const { sessions } = await api('/sessions')
+					render(sessions)
+				} catch (e) {
+					document.getElementById('grid').innerHTML =
+						`<div class="empty">Erro ao carregar: ${escapeHtml(e.message)}</div>`
+				}
+			}
+
+			load()
+			setInterval(load, 8000)
+		</script>
+	</body>
+</html>
