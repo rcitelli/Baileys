@@ -6,6 +6,7 @@ import makeWASocket, {
 	type ConnectionState,
 	DisconnectReason,
 	fetchLatestBaileysVersion,
+	getContentType,
 	jidNormalizedUser,
 	makeCacheableSignalKeyStore,
 	type MiscMessageGenerationOptions,
@@ -15,9 +16,22 @@ import makeWASocket, {
 } from '../wa.js'
 import QRCode from 'qrcode'
 import { config } from '../config.js'
+import { appendHistory, queryHistory } from '../history.js'
 import { logger } from '../logger.js'
 import type { SessionInfo, SessionMeta, SessionStatus, WebhookEvent } from '../types.js'
 import { dispatchWebhook } from '../webhooks/dispatcher.js'
+
+interface ContactLite {
+	id: string
+	name?: string
+	notify?: string
+}
+interface ChatLite {
+	id: string
+	name?: string
+	unread?: number
+	ts?: number
+}
 
 const RECONNECT_DELAY_MS = 3000
 
@@ -50,6 +64,10 @@ export class Session extends EventEmitter {
 	private starting = false
 	private stopped = false
 	private reconnectTimer?: NodeJS.Timeout
+
+	// Live, in-memory only (not persisted) — cleared on restart. Matches "live, on-demand".
+	private readonly contacts = new Map<string, ContactLite>()
+	private readonly chats = new Map<string, ChatLite>()
 
 	constructor(meta: SessionMeta, paths: SessionPaths) {
 		super()
@@ -149,6 +167,8 @@ export class Session extends EventEmitter {
 				await this.onConnectionUpdate(update)
 			}
 
+			this.capture(events)
+
 			for (const key of Object.keys(events) as (keyof typeof events)[]) {
 				if (key === 'creds.update' || key === 'connection.update') {
 					continue
@@ -157,6 +177,100 @@ export class Session extends EventEmitter {
 				this.forward(key as WebhookEvent, events[key])
 			}
 		})
+	}
+
+	/** Extract metadata-only history + maintain live contact/chat maps from events. */
+	private capture(events: Record<string, unknown>) {
+		try {
+			const upserts = events['messages.upsert'] as { messages?: unknown[] } | undefined
+			if (upserts?.messages) {
+				for (const raw of upserts.messages) {
+					const m = raw as {
+						key?: { id?: string; remoteJid?: string; fromMe?: boolean }
+						message?: Record<string, unknown>
+						messageTimestamp?: number | { toNumber?: () => number }
+						status?: number
+					}
+					if (!m.key?.remoteJid) {
+						continue
+					}
+
+					const rawTs = m.messageTimestamp
+					const ts =
+						typeof rawTs === 'number' ? rawTs : (rawTs?.toNumber?.() ?? Math.floor(Date.now() / 1000))
+					void appendHistory(this.id, {
+						t: ts * 1000,
+						dir: m.key.fromMe ? 'out' : 'in',
+						chat: m.key.remoteJid,
+						type: m.message ? (getContentType(m.message as never) ?? 'unknown') : 'unknown',
+						id: m.key.id,
+						status: typeof m.status === 'number' ? String(m.status) : undefined
+					})
+
+					const chat = this.chats.get(m.key.remoteJid) ?? { id: m.key.remoteJid }
+					chat.ts = ts
+					this.chats.set(m.key.remoteJid, chat)
+				}
+			}
+
+			const contacts = [
+				...((events['contacts.upsert'] as unknown[]) ?? []),
+				...((events['contacts.update'] as unknown[]) ?? [])
+			] as Array<{ id?: string; name?: string; notify?: string }>
+			for (const c of contacts) {
+				if (c.id) {
+					const prev = this.contacts.get(c.id) ?? { id: c.id }
+					this.contacts.set(c.id, { id: c.id, name: c.name ?? prev.name, notify: c.notify ?? prev.notify })
+				}
+			}
+
+			const chats = [
+				...((events['chats.upsert'] as unknown[]) ?? []),
+				...((events['chats.update'] as unknown[]) ?? [])
+			] as Array<{ id?: string; name?: string; unreadCount?: number; conversationTimestamp?: number }>
+			for (const c of chats) {
+				if (c.id) {
+					const prev = this.chats.get(c.id) ?? { id: c.id }
+					this.chats.set(c.id, {
+						id: c.id,
+						name: c.name ?? prev.name,
+						unread: c.unreadCount ?? prev.unread,
+						ts: c.conversationTimestamp ?? prev.ts
+					})
+				}
+			}
+
+			const histSet = events['messaging-history.set'] as
+				| { contacts?: Array<{ id?: string; name?: string; notify?: string }>; chats?: Array<{ id?: string; name?: string; conversationTimestamp?: number }> }
+				| undefined
+			if (histSet) {
+				for (const c of histSet.contacts ?? []) {
+					if (c.id) {
+						this.contacts.set(c.id, { id: c.id, name: c.name, notify: c.notify })
+					}
+				}
+				for (const c of histSet.chats ?? []) {
+					if (c.id) {
+						const prev = this.chats.get(c.id) ?? { id: c.id }
+						this.chats.set(c.id, { id: c.id, name: c.name ?? prev.name, ts: c.conversationTimestamp ?? prev.ts })
+					}
+				}
+			}
+		} catch (error) {
+			logger.warn({ session: this.id, err: (error as Error).message }, 'event capture failed')
+		}
+	}
+
+	getContacts(): ContactLite[] {
+		return [...this.contacts.values()].sort((a, b) => (a.name ?? a.notify ?? a.id).localeCompare(b.name ?? b.notify ?? b.id))
+	}
+
+	getChats(): ChatLite[] {
+		return [...this.chats.values()].sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0))
+	}
+
+	async getHistory(limit = 100) {
+		return queryHistory(this.id, limit)
 	}
 
 	private async onConnectionUpdate(update: Partial<ConnectionState>) {

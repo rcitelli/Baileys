@@ -7,6 +7,7 @@ import { createApiRouter } from './api/routes.js'
 import { apiLimiter, securityHeaders } from './api/security.js'
 import { appStore } from './apps.js'
 import { config } from './config.js'
+import { startHistoryCleanup } from './history.js'
 import { logger } from './logger.js'
 import { SessionManager } from './sessions/manager.js'
 
@@ -16,6 +17,7 @@ const main = async () => {
 	const manager = new SessionManager()
 	await appStore.init()
 	await manager.init()
+	startHistoryCleanup()
 
 	const app = express()
 	app.disable('x-powered-by')

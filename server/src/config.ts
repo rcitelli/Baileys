@@ -86,6 +86,13 @@ export const config = {
 		autostart: bool(process.env.SESSION_AUTOSTART, true),
 		/** Mark the outgoing socket as always-online */
 		markOnlineOnConnect: bool(process.env.SESSION_MARK_ONLINE, false)
+	},
+
+	history: {
+		/** Persist message METADATA (no content) for the panel's activity view */
+		enabled: bool(process.env.HISTORY_ENABLED, true),
+		/** Days to keep metadata before automatic cleanup */
+		retentionDays: num(process.env.HISTORY_RETENTION_DAYS, 30)
 	}
 } as const
 

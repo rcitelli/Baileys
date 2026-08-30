@@ -2,6 +2,7 @@ import { Boom } from '@hapi/boom'
 import { type AnyMessageContent, isJidGroup } from '../wa.js'
 import { type Request, type Response, Router } from 'express'
 import { appStore } from '../apps.js'
+import { buildApiDocs, DOCS_VERSION } from '../docs.js'
 import type { SessionManager } from '../sessions/manager.js'
 import { checkUpdates, getCurrentVersion, getHealth, listApiClients } from '../system.js'
 import type { WebhookEvent } from '../types.js'
@@ -125,6 +126,24 @@ export const createApiRouter = (manager: SessionManager): Router => {
 			requirePanelUser(req)
 			await appStore.revoke(req.params.id!)
 			res.status(204).end()
+		})
+	)
+
+	router.get(
+		'/system/api-docs',
+		asyncHandler(async (req, res) => {
+			const md = buildApiDocs(await getCurrentVersion())
+			if (req.query.meta === '1') {
+				res.json({ version: DOCS_VERSION, filename: `baileys-hub-api-v${DOCS_VERSION}.md`, markdown: md })
+				return
+			}
+
+			res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+			if (req.query.download === '1') {
+				res.setHeader('Content-Disposition', `attachment; filename="baileys-hub-api-v${DOCS_VERSION}.md"`)
+			}
+
+			res.send(md)
 		})
 	)
 
@@ -318,6 +337,30 @@ export const createApiRouter = (manager: SessionManager): Router => {
 
 			await manager.get(req.params.id!).readMessages(keys)
 			res.json({ ok: true })
+		})
+	)
+
+	// ---- Contacts / chats / history (per session) --------------------------
+
+	router.get(
+		'/sessions/:id/contacts',
+		asyncHandler((req, res) => {
+			res.json({ contacts: manager.get(req.params.id!).getContacts() })
+		})
+	)
+
+	router.get(
+		'/sessions/:id/chats',
+		asyncHandler((req, res) => {
+			res.json({ chats: manager.get(req.params.id!).getChats() })
+		})
+	)
+
+	router.get(
+		'/sessions/:id/history',
+		asyncHandler(async (req, res) => {
+			const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 1000)
+			res.json({ history: await manager.get(req.params.id!).getHistory(limit) })
 		})
 	)
 
