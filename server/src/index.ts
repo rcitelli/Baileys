@@ -5,6 +5,7 @@ import express from 'express'
 import { authenticate, cloudflareConfigured, requireCloudflareUser } from './api/auth.js'
 import { createApiRouter } from './api/routes.js'
 import { apiLimiter, securityHeaders } from './api/security.js'
+import { appStore } from './apps.js'
 import { config } from './config.js'
 import { logger } from './logger.js'
 import { SessionManager } from './sessions/manager.js'
@@ -13,6 +14,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const main = async () => {
 	const manager = new SessionManager()
+	await appStore.init()
 	await manager.init()
 
 	const app = express()

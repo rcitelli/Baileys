@@ -302,17 +302,29 @@
 			<!-- ============ APLICATIVOS ============ -->
 			<section id="sec-apps" hidden>
 				<div class="page-head">
-					<div><h1>Aplicativos & API</h1><p>Chaves de API que suas aplicações usam para falar com este servidor.</p></div>
+					<div><h1>Aplicativos & API</h1><p>Chaves que suas aplicações usam para falar com este servidor.</p></div>
+					<button class="btn primary" id="btn-new-app">
+						<svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Novo app
+					</button>
 				</div>
 				<div class="banner">
 					<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-					<div>As chaves são definidas em <code class="key">API_KEYS</code> no <code class="key">.env</code> do servidor. Cada aplicação envia a sua no header <code class="key">Authorization: Bearer &lt;chave&gt;</code>. Gerenciar chaves (criar/revogar) e nomes pelo painel está no roadmap.</div>
+					<div>Cada app envia sua chave no header <code class="key">Authorization: Bearer &lt;chave&gt;</code>. A chave é mostrada <b>uma única vez</b> ao criar — o servidor guarda só o hash. Revogar é imediato.</div>
 				</div>
-				<div class="panel">
+				<div class="panel" style="margin-bottom:18px">
 					<table>
-						<thead><tr><th>App</th><th>Chave (mascarada)</th><th>Requisições</th><th>Último uso</th><th>Último IP</th></tr></thead>
+						<thead><tr><th>App</th><th>Prefixo da chave</th><th>Requisições</th><th>Último uso</th><th>Último IP</th><th></th></tr></thead>
 						<tbody id="apps-body"></tbody>
 					</table>
+				</div>
+				<div id="legacy-wrap" hidden>
+					<div style="color:var(--faint);font-size:12px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin:0 4px 8px">Chaves legadas (via .env)</div>
+					<div class="panel">
+						<table>
+							<thead><tr><th>Origem</th><th>Chave (mascarada)</th><th>Requisições</th><th>Último uso</th><th>Último IP</th></tr></thead>
+							<tbody id="legacy-body"></tbody>
+						</table>
+					</div>
 				</div>
 			</section>
 
@@ -380,6 +392,32 @@
 			</div>
 		</dialog>
 
+		<!-- ===== Dialog: novo app ===== -->
+		<dialog id="dlg-app">
+			<form method="dialog">
+				<div class="dlg-head">Novo aplicativo <button type="button" class="x" data-close><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+				<div class="dlg-body">
+					<label class="field">Nome do app<input name="name" placeholder="Ex.: elo-financeiro" autofocus /></label>
+					<div style="color:var(--muted);font-size:12.5px">Uma nova chave será gerada. Guarde-a com segurança — ela só aparece agora.</div>
+				</div>
+				<div class="dlg-foot">
+					<button value="cancel" class="btn ghost">Cancelar</button>
+					<button value="ok" class="btn primary">Gerar chave</button>
+				</div>
+			</form>
+		</dialog>
+
+		<!-- ===== Dialog: chave criada ===== -->
+		<dialog id="dlg-key">
+			<div class="dlg-head">Chave criada <button type="button" class="x" data-close><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+			<div class="dlg-body">
+				<div class="banner" style="margin:0"><svg class="ic" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg><div>Copie agora. Por segurança, o servidor <b>não</b> guarda a chave — só o hash. Não será possível vê-la de novo.</div></div>
+				<label class="field">Chave<input id="new-key-val" readonly onclick="this.select()" /></label>
+				<button class="btn primary" id="copy-key" style="align-self:flex-start"><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M9 9h10v10H9zM5 15V5h10"/></svg> Copiar chave</button>
+			</div>
+			<div class="dlg-foot"><button class="btn" data-close>Fechar</button></div>
+		</dialog>
+
 		<div class="toast" id="toast"></div>
 
 		<script>
@@ -426,6 +464,7 @@
 			}
 			const go = (sec) => {
 				current = sec
+				if (location.hash.slice(1) !== sec) location.hash = sec
 				SECTIONS.forEach(s => $('#sec-'+s.id).hidden = s.id !== sec)
 				$('#nav').querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.sec === sec))
 				if (sec === 'apps') loadApps()
@@ -520,15 +559,51 @@
 			/* ---------- apps ---------- */
 			const loadApps = async () => {
 				try {
-					const { apps } = await api('/system/apps')
-					$('#apps-body').innerHTML = apps.length ? apps.map(a => `<tr>
-						<td><b>App #${a.id}</b></td>
-						<td><code class="key">${esc(a.masked)}</code></td>
-						<td>${a.count.toLocaleString('pt-BR')}</td>
+					const { apps, legacy } = await api('/system/apps')
+					$('#apps-body').innerHTML = apps.length ? apps.map(a => `<tr style="${a.enabled?'':'opacity:.5'}">
+						<td><b>${esc(a.name)}</b>${a.enabled?'':' <span class="pill logged_out" style="font-size:10px">revogada</span>'}</td>
+						<td><code class="key">${esc(a.keyPrefix)}</code></td>
+						<td>${a.requests.toLocaleString('pt-BR')}</td>
 						<td>${esc(ago(a.lastUsedAt))}</td>
+						<td style="color:var(--muted)">${esc(a.lastIp||'—')}</td>
+						<td style="text-align:right;white-space:nowrap">
+							<button class="btn sm ghost" data-toggle="${a.id}" data-en="${a.enabled}">${a.enabled?'Desativar':'Ativar'}</button>
+							<button class="btn sm danger ghost" data-revoke="${a.id}" data-name="${esc(a.name)}">${svg(ICON.trash)}</button>
+						</td></tr>`).join('')
+						: `<tr><td colspan="6" style="color:var(--muted);text-align:center;padding:30px">Nenhum app ainda. Clique em <b>“Novo app”</b> para gerar uma chave.</td></tr>`
+					$('#apps-body').querySelectorAll('[data-revoke]').forEach(b => b.onclick = async () => {
+						if (!confirm(`Revogar a chave de "${b.dataset.name}"? As requisições com ela param imediatamente.`)) return
+						try { await api('/system/apps/'+b.dataset.revoke, { method:'DELETE' }); toast('Chave revogada'); loadApps() } catch(e){ toast('Erro: '+e.message,false) }
+					})
+					$('#apps-body').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
+						try { await api('/system/apps/'+b.dataset.toggle, { method:'PATCH', body:JSON.stringify({ enabled: b.dataset.en!=='true' }) }); loadApps() } catch(e){ toast('Erro: '+e.message,false) }
+					})
+					const lw = $('#legacy-wrap'); lw.hidden = !legacy || legacy.length===0
+					if (legacy && legacy.length) $('#legacy-body').innerHTML = legacy.map(a => `<tr>
+						<td>.env #${a.id}</td><td><code class="key">${esc(a.masked)}</code></td>
+						<td>${a.count.toLocaleString('pt-BR')}</td><td>${esc(ago(a.lastUsedAt))}</td>
 						<td style="color:var(--muted)">${esc(a.lastIp||'—')}</td></tr>`).join('')
-						: `<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:30px">Nenhuma chave configurada em API_KEYS.</td></tr>`
-				} catch (e) { $('#apps-body').innerHTML = `<tr><td colspan="5" style="color:var(--red)">Erro: ${esc(e.message)}</td></tr>` }
+				} catch (e) { $('#apps-body').innerHTML = `<tr><td colspan="6" style="color:var(--red)">Erro: ${esc(e.message)}</td></tr>` }
+			}
+			const dApp = $('#dlg-app')
+			$('#btn-new-app').onclick = () => { dApp.querySelector('form').reset(); dApp.showModal() }
+			dApp.querySelector('form').addEventListener('submit', async e => {
+				if (e.submitter?.value !== 'ok') return
+				e.preventDefault()
+				const name = e.target.name.value.trim()
+				if (!name) return
+				try {
+					const { key } = await api('/system/apps', { method:'POST', body:JSON.stringify({ name }) })
+					dApp.close()
+					$('#new-key-val').value = key
+					$('#dlg-key').showModal()
+					loadApps()
+				} catch (err) { toast('Erro: '+err.message, false) }
+			})
+			$('#copy-key').onclick = async () => {
+				const v = $('#new-key-val').value
+				try { await navigator.clipboard.writeText(v); toast('Chave copiada') }
+				catch { $('#new-key-val').select(); document.execCommand('copy'); toast('Chave copiada') }
 			}
 
 			/* ---------- health ---------- */
@@ -578,7 +653,10 @@ cd server && docker compose up -d --build</pre><div style="color:var(--faint);fo
 
 			/* ---------- boot ---------- */
 			const boot = async () => {
-				buildNav(); go('sessions')
+				buildNav()
+				const initial = location.hash.slice(1)
+				go(SECTIONS.some(s => s.id === initial) ? initial : 'sessions')
+				window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (SECTIONS.some(s=>s.id===h) && h!==current) go(h) })
 				try {
 					const info = await api('/system/info')
 					cloudflareOn = info.cloudflare

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
+import { appStore } from '../apps.js'
 import { config } from '../config.js'
 import { logger } from '../logger.js'
 import { recordApiKeyUse } from '../system.js'
@@ -72,15 +73,18 @@ const matchApiKeyIndex = (provided: string): number => {
 }
 
 const verifyApiKey = (req: Request): Principal | undefined => {
-	if (config.auth.apiKeys.length === 0) {
-		return undefined
-	}
-
 	const key = extractApiKey(req)
 	if (!key) {
 		return undefined
 	}
 
+	// Managed apps (created via the panel, persisted to disk).
+	const appId = appStore.verify(key, clientIp(req))
+	if (appId) {
+		return { kind: 'service', id: `app-${appId}` }
+	}
+
+	// Legacy static keys from API_KEYS in .env.
 	const index = matchApiKeyIndex(key)
 	if (index >= 0) {
 		recordApiKeyUse(index, clientIp(req))

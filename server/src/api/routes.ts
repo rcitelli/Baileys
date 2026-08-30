@@ -1,11 +1,21 @@
 import { Boom } from '@hapi/boom'
 import { type AnyMessageContent, isJidGroup } from '../wa.js'
 import { type Request, type Response, Router } from 'express'
+import { appStore } from '../apps.js'
 import type { SessionManager } from '../sessions/manager.js'
 import { checkUpdates, getCurrentVersion, getHealth, listApiClients } from '../system.js'
 import type { WebhookEvent } from '../types.js'
 import { cloudflareConfigured } from './auth.js'
 import { sensitiveLimiter } from './security.js'
+
+/** Managing apps/keys is a panel-admin action — a service API key must not do it. */
+const requirePanelUser = (req: Request): void => {
+	if (req.principal?.kind === 'service') {
+		throw new Boom('This action requires a panel (Cloudflare Access) session, not an API key', {
+			statusCode: 403
+		})
+	}
+}
 
 type Handler = (req: Request, res: Response) => Promise<unknown> | unknown
 
@@ -81,7 +91,40 @@ export const createApiRouter = (manager: SessionManager): Router => {
 	router.get(
 		'/system/apps',
 		asyncHandler((_req, res) => {
-			res.json({ apps: listApiClients() })
+			res.json({ apps: appStore.list(), legacy: listApiClients() })
+		})
+	)
+
+	router.post(
+		'/system/apps',
+		asyncHandler(async (req, res) => {
+			requirePanelUser(req)
+			const name = (req.body?.name ?? '').toString().trim()
+			if (!name) {
+				throw new Boom('`name` is required', { statusCode: 400 })
+			}
+
+			// `key` is returned exactly once here and never again — only its hash is stored.
+			const { app, key } = await appStore.create(name)
+			res.status(201).json({ app, key })
+		})
+	)
+
+	router.patch(
+		'/system/apps/:id',
+		asyncHandler(async (req, res) => {
+			requirePanelUser(req)
+			const { name, enabled } = req.body ?? {}
+			res.json(await appStore.update(req.params.id!, { name, enabled }))
+		})
+	)
+
+	router.delete(
+		'/system/apps/:id',
+		asyncHandler(async (req, res) => {
+			requirePanelUser(req)
+			await appStore.revoke(req.params.id!)
+			res.status(204).end()
 		})
 	)
 
