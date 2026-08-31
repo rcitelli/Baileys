@@ -45,7 +45,14 @@ export const ALL_WEBHOOK_EVENTS: WebhookEvent[] = [
 
 /** Persisted, on-disk metadata for a session (meta.json) */
 export interface SessionMeta {
+	/** Global, namespaced id (e.g. "elo-financeiro__vendas"). Also the on-disk folder. */
 	id: string
+	/** Tenant-facing id (what the owning empresa uses in the API). */
+	localId: string
+	/** Owning empresa (app) id — undefined for operator-owned sessions. */
+	ownerAppId?: string
+	/** Owning empresa slug, mirrored for display/namespacing. */
+	ownerSlug?: string
 	name: string
 	webhookUrl?: string
 	webhookEvents: WebhookEvent[]
@@ -55,6 +62,8 @@ export interface SessionMeta {
 
 /** Runtime view of a session returned by the API */
 export interface SessionInfo extends SessionMeta {
+	/** Display name of the owning empresa (admin views only). */
+	ownerName?: string
 	status: SessionStatus
 	/** Connected WhatsApp account JID, once open */
 	jid?: string
@@ -73,4 +82,7 @@ export interface CreateSessionInput {
 	name?: string
 	webhookUrl?: string
 	webhookEvents?: WebhookEvent[]
+	/** Owning empresa — set by the operator when creating on a tenant's behalf. */
+	ownerAppId?: string
+	ownerSlug?: string
 }

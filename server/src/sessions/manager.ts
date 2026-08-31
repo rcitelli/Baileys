@@ -9,7 +9,10 @@ import { Session, type SessionPaths } from './session.js'
 
 const META_FILE = 'meta.json'
 const AUTH_DIR = 'auth'
+/** Tenant-facing (local) session id */
 const ID_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/
+/** Full namespaced id, e.g. "elo-financeiro__vendas" — also the on-disk folder name */
+const FULL_ID_PATTERN = /^[a-zA-Z0-9_-]{1,120}$/
 
 const pathsFor = (id: string): SessionPaths => {
 	const root = join(config.dataDir, id)
@@ -58,7 +61,13 @@ export class SessionManager extends EventEmitter {
 	private async readMeta(id: string): Promise<SessionMeta | undefined> {
 		try {
 			const raw = await readFile(pathsFor(id).metaFile, 'utf-8')
-			return JSON.parse(raw) as SessionMeta
+			const meta = JSON.parse(raw) as SessionMeta
+			// Migrate pre-multitenant sessions: no owner, local id == global id (operator-owned).
+			if (!meta.localId) {
+				meta.localId = meta.id
+			}
+
+			return meta
 		} catch {
 			return undefined
 		}
@@ -101,6 +110,11 @@ export class SessionManager extends EventEmitter {
 		return this.sessions.has(id)
 	}
 
+	/** Sessions owned by a given empresa (tenant). */
+	listForTenant(appId: string): Session[] {
+		return this.list().filter(s => s.getMeta().ownerAppId === appId)
+	}
+
 	private normalizeEvents(events?: WebhookEvent[]): WebhookEvent[] {
 		if (!events || events.length === 0) {
 			return ['connection.update', 'messages.upsert']
@@ -110,21 +124,32 @@ export class SessionManager extends EventEmitter {
 	}
 
 	async create(input: CreateSessionInput): Promise<Session> {
-		const id = input.id?.trim() || `session-${Date.now().toString(36)}`
-		if (!ID_PATTERN.test(id)) {
+		const localId = input.id?.trim() || `sess-${Date.now().toString(36)}`
+		if (!ID_PATTERN.test(localId)) {
 			throw new Boom('Invalid session id — use letters, numbers, - and _ (max 64 chars)', {
 				statusCode: 400
 			})
 		}
 
+		// Namespace by empresa slug so tenants have isolated id spaces on disk and in the API.
+		const owner =
+			input.ownerAppId && input.ownerSlug ? { appId: input.ownerAppId, slug: input.ownerSlug } : undefined
+		const id = owner ? `${owner.slug}__${localId}` : localId
+		if (!FULL_ID_PATTERN.test(id)) {
+			throw new Boom('Session id too long after namespacing', { statusCode: 400 })
+		}
+
 		if (this.sessions.has(id)) {
-			throw new Boom(`Session '${id}' already exists`, { statusCode: 409 })
+			throw new Boom(`Session '${localId}' already exists`, { statusCode: 409 })
 		}
 
 		const now = new Date().toISOString()
 		const meta: SessionMeta = {
 			id,
-			name: input.name?.trim() || id,
+			localId,
+			ownerAppId: owner?.appId,
+			ownerSlug: owner?.slug,
+			name: input.name?.trim() || localId,
 			webhookUrl: input.webhookUrl?.trim() || undefined,
 			webhookEvents: this.normalizeEvents(input.webhookEvents),
 			createdAt: now,

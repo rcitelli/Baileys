@@ -10,6 +10,10 @@ export interface Principal {
 	kind: 'service' | 'user' | 'anonymous'
 	id: string
 	email?: string
+	/** true = operator (Cloudflare user, .env key, or dev) with access to every tenant */
+	admin: boolean
+	/** set for a managed app key — scopes the request to this tenant (empresa) */
+	tenant?: { id: string; slug: string; name: string }
 }
 
 declare global {
@@ -78,17 +82,17 @@ const verifyApiKey = (req: Request): Principal | undefined => {
 		return undefined
 	}
 
-	// Managed apps (created via the panel, persisted to disk).
-	const appId = appStore.verify(key, clientIp(req))
-	if (appId) {
-		return { kind: 'service', id: `app-${appId}` }
+	// Managed apps (created via the panel) — scoped to their tenant (empresa).
+	const tenant = appStore.verify(key, clientIp(req))
+	if (tenant) {
+		return { kind: 'service', id: `app-${tenant.id}`, admin: false, tenant }
 	}
 
-	// Legacy static keys from API_KEYS in .env.
+	// Legacy static keys from API_KEYS in .env — operator-level (admin).
 	const index = matchApiKeyIndex(key)
 	if (index >= 0) {
 		recordApiKeyUse(index, clientIp(req))
-		return { kind: 'service', id: `api-key-${index + 1}` }
+		return { kind: 'service', id: `api-key-${index + 1}`, admin: true }
 	}
 
 	return undefined
@@ -127,7 +131,8 @@ const verifyCloudflare = async (req: Request): Promise<Principal | undefined> =>
 		return {
 			kind: 'user',
 			id: String(payload.sub ?? 'cf-user'),
-			email: typeof payload.email === 'string' ? payload.email : undefined
+			email: typeof payload.email === 'string' ? payload.email : undefined,
+			admin: true
 		}
 	} catch (error) {
 		logger.warn({ err: (error as Error).message }, 'cloudflare access token verification failed')
@@ -138,7 +143,7 @@ const verifyCloudflare = async (req: Request): Promise<Principal | undefined> =>
 /** Express middleware: allow if a valid API key OR a valid Cloudflare Access JWT is present. */
 export const authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
 	if (config.auth.disabled) {
-		req.principal = { kind: 'anonymous', id: 'anonymous' }
+		req.principal = { kind: 'anonymous', id: 'anonymous', admin: true }
 		next()
 		return
 	}

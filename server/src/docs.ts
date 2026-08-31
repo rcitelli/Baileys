@@ -1,7 +1,7 @@
 import { ALL_WEBHOOK_EVENTS } from './types.js'
 
 /** Bump when the API surface documented here changes. */
-export const DOCS_VERSION = '1.0.0'
+export const DOCS_VERSION = '1.1.0'
 
 /** Build the full API reference as Markdown, stamped with the docs + library versions. */
 export const buildApiDocs = (libraryVersion: string): string => {
@@ -29,6 +29,15 @@ Toda rota \`/api/*\` exige **uma** das provas:
 - **Cloudflare Access** (navegador) — o JWT injetado por Cloudflare é verificado na origem.
 
 No hostname público do painel, uma API Key sozinha é recusada — chamadas de máquina usam a rede interna (\`127.0.0.1\` / rede Docker).
+
+### Isolamento por empresa (multi-tenant)
+
+Cada chave de empresa é **isolada**: com ela, a empresa só enxerga e controla as **próprias** sessões.
+
+- Os IDs de sessão têm **namespace por empresa** — a Empresa A e a B podem ambas usar \`vendas\` sem conflito. Na API, cada empresa usa seu ID local (ex.: \`vendas\`); internamente vira \`<empresa>__vendas\`.
+- \`GET /api/sessions\` retorna apenas as sessões da empresa autenticada.
+- Tentar acessar uma sessão de outra empresa retorna \`404\` (como se não existisse).
+- O **operador** (login Cloudflare Access, ou chave do \`.env\`) tem visão de administrador: vê e gerencia as sessões de todas as empresas.
 
 ### Formato de erro
 \`\`\`json
