@@ -35,6 +35,7 @@ COPY --from=baileys-build /app/package.json ./package.json
 COPY --from=server-deps /app/server/node_modules ./server/node_modules
 COPY server/package.json server/tsconfig.json ./server/
 COPY server/src ./server/src
+COPY server/scripts ./server/scripts
 
 WORKDIR /app/server
 ENV DATA_DIR=/app/server/data
