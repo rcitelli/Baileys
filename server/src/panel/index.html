@@ -653,6 +653,7 @@
 						<td>${esc(ago(a.lastUsedAt))}</td>
 						<td style="color:var(--muted)">${esc(a.lastIp||'—')}</td>
 						<td style="text-align:right;white-space:nowrap">
+							<button class="btn sm ghost" data-rename="${a.id}" data-name="${esc(a.name)}">${svg(ICON.edit)}</button>
 							<button class="btn sm ghost" data-toggle="${a.id}" data-en="${a.enabled}">${a.enabled?'Desativar':'Ativar'}</button>
 							<button class="btn sm danger ghost" data-revoke="${a.id}" data-name="${esc(a.name)}">${svg(ICON.trash)}</button>
 						</td></tr>`).join('')
@@ -663,6 +664,11 @@
 					})
 					$('#apps-body').querySelectorAll('[data-toggle]').forEach(b => b.onclick = async () => {
 						try { await api('/system/apps/'+b.dataset.toggle, { method:'PATCH', body:JSON.stringify({ enabled: b.dataset.en!=='true' }) }); loadApps() } catch(e){ toast('Erro: '+e.message,false) }
+					})
+					$('#apps-body').querySelectorAll('[data-rename]').forEach(b => b.onclick = async () => {
+						const novo = prompt('Novo nome da empresa:', b.dataset.name); if (novo===null) return
+						const name = novo.trim(); if (!name || name===b.dataset.name) return
+						try { await api('/system/apps/'+b.dataset.rename, { method:'PATCH', body:JSON.stringify({ name }) }); toast('Empresa renomeada'); loadApps() } catch(e){ toast('Erro: '+e.message,false) }
 					})
 					const lw = $('#legacy-wrap'); lw.hidden = !legacy || legacy.length===0
 					if (legacy && legacy.length) $('#legacy-body').innerHTML = legacy.map(a => `<tr>
