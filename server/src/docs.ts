@@ -51,8 +51,8 @@ Códigos: \`400\` inválido · \`401\` não autenticado · \`403\` proibido (ex.
 
 | Método | Rota | Descrição |
 |---|---|---|
-| GET | \`/api/sessions\` | Lista todas as sessões com status. |
-| POST | \`/api/sessions\` | Cria uma sessão. Body: \`{ id?, name?, webhookUrl?, webhookEvents? }\`. |
+| GET | \`/api/sessions\` | Lista as sessões da empresa autenticada (todas, se operador). |
+| POST | \`/api/sessions\` | Cria uma sessão. Body: \`{ id?, name?, webhookUrl?, webhookEvents? }\`. \`id\` é o identificador **local** da empresa (único dentro dela). O operador pode passar \`ownerAppId\` para atribuir a sessão a uma empresa. |
 | GET | \`/api/sessions/:id\` | Detalhes/status. |
 | PATCH | \`/api/sessions/:id\` | Atualiza \`name\`, \`webhookUrl\`, \`webhookEvents\`. |
 | DELETE | \`/api/sessions/:id\` | Desloga e apaga as credenciais do disco. |
@@ -73,6 +73,8 @@ Códigos: \`400\` inválido · \`401\` não autenticado · \`403\` proibido (ex.
 }
 \`\`\`
 \`status\`: \`idle\` · \`connecting\` · \`qr\` · \`pairing\` · \`open\` · \`close\` · \`logged_out\`.
+
+Para uma empresa, \`id\` é o seu identificador local. Para o operador, \`id\` é o global (\`<empresa>__<local>\`) e a resposta inclui \`ownerName\` (empresa dona).
 
 ---
 
