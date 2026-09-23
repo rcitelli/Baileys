@@ -7,6 +7,8 @@ import makeWASocket, {
 	DisconnectReason,
 	fetchLatestBaileysVersion,
 	getContentType,
+	isLidUser,
+	isPnUser,
 	jidNormalizedUser,
 	makeCacheableSignalKeyStore,
 	type MiscMessageGenerationOptions,
@@ -522,24 +524,41 @@ export class Session extends EventEmitter {
 		return { requestId, jid, anchor: { ...chosen, remoteJid: jid } }
 	}
 
-	/** JIDs a chat may be keyed under: the given jid, or pn jid + its mapped lid. */
+	/**
+	 * JIDs a chat may be keyed under. The target (jid or phone number) is normalized
+	 * (device suffix dropped) and expanded with its counterpart identity — pn → mapped
+	 * lid, lid → mapped pn — since stored history may use either form.
+	 */
 	private async chatJidCandidates(target: string): Promise<string[]> {
 		const value = String(target).trim()
+		let primary: string
 		if (value.includes('@')) {
-			return [value]
+			primary = jidNormalizedUser(value)
+			if (!primary) {
+				throw new Boom('Invalid chat JID', { statusCode: 400 })
+			}
+		} else {
+			const digits = value.replace(/[^0-9]/g, '')
+			if (!digits) {
+				throw new Boom('Invalid chat — pass a JID or a phone number', { statusCode: 400 })
+			}
+
+			primary = `${digits}@s.whatsapp.net`
 		}
 
-		const digits = value.replace(/[^0-9]/g, '')
-		if (!digits) {
-			throw new Boom('Invalid chat — pass a JID or a phone number', { statusCode: 400 })
-		}
-
-		const pn = `${digits}@s.whatsapp.net`
-		const out = [pn]
+		const out = [primary]
 		try {
-			const lid = await this.sock?.signalRepository.lidMapping.getLIDForPN(pn)
-			if (lid) {
-				out.push(jidNormalizedUser(lid))
+			const mapping = this.sock?.signalRepository.lidMapping
+			const other = isPnUser(primary)
+				? await mapping?.getLIDForPN(primary)
+				: isLidUser(primary)
+					? await mapping?.getPNForLID(primary)
+					: undefined
+			if (other) {
+				const normalized = jidNormalizedUser(other)
+				if (normalized && !out.includes(normalized)) {
+					out.push(normalized)
+				}
 			}
 		} catch {
 			// mapping is best-effort

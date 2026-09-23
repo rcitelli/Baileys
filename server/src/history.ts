@@ -50,19 +50,21 @@ export const appendHistoryBatch = async (sessionId: string, entries: HistoryEntr
 		return
 	}
 
-	const byDay = new Map<string, string[]>()
+	const byDay = new Map<string, HistoryEntry[]>()
 	for (const entry of entries) {
 		const name = dayFileName(new Date(entry.t))
 		const lines = byDay.get(name) ?? []
-		lines.push(JSON.stringify(entry))
+		lines.push(entry)
 		byDay.set(name, lines)
 	}
 
 	try {
 		const dir = historyDir(sessionId)
 		await mkdir(dir, { recursive: true })
-		for (const [name, lines] of byDay) {
-			await appendFile(join(dir, name), lines.join('\n') + '\n')
+		for (const [name, dayEntries] of byDay) {
+			// oldest → newest within the batch (history arrives newest-first)
+			dayEntries.sort((a, b) => a.t - b.t)
+			await appendFile(join(dir, name), dayEntries.map(e => JSON.stringify(e)).join('\n') + '\n')
 		}
 	} catch (error) {
 		logger.warn({ session: sessionId, err: (error as Error).message }, 'history batch append failed')
@@ -86,18 +88,24 @@ export const queryHistory = async (sessionId: string, limit = 100): Promise<Hist
 		}
 
 		try {
-			const lines = (await readFile(join(dir, file), 'utf-8')).split('\n').filter(Boolean)
-			for (let i = lines.length - 1; i >= 0; i--) {
+			// A day file is NOT guaranteed chronological: history backfill appends older
+			// messages after live ones (and WhatsApp sends history newest-first). Rank the
+			// whole day by timestamp before taking from it.
+			const entries: HistoryEntry[] = []
+			for (const line of (await readFile(join(dir, file), 'utf-8')).split('\n')) {
+				if (!line) {
+					continue
+				}
+
 				try {
-					out.push(JSON.parse(lines[i]!) as HistoryEntry)
+					entries.push(JSON.parse(line) as HistoryEntry)
 				} catch {
 					// skip malformed line
 				}
-
-				if (out.length >= limit) {
-					break
-				}
 			}
+
+			entries.sort((a, b) => b.t - a.t)
+			out.push(...entries.slice(0, limit - out.length))
 		} catch {
 			// skip unreadable file
 		}
