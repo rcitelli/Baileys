@@ -587,11 +587,18 @@ export class Session extends EventEmitter {
 
 		const jid = chosen.remoteJid || (await this.chatJidCandidates(target))[0]!
 		const token = this.registerPending(origin, await this.chatJidCandidates(jid))
-		const requestId = await sock.fetchMessageHistory(
-			n,
-			{ remoteJid: jid, fromMe: chosen.fromMe, id: chosen.id },
-			chosen.timestamp
-		)
+		let requestId: string
+		try {
+			requestId = await sock.fetchMessageHistory(
+				n,
+				{ remoteJid: jid, fromMe: chosen.fromMe, id: chosen.id },
+				chosen.timestamp
+			)
+		} catch (error) {
+			this.pending.delete(token)
+			throw error
+		}
+
 		const entry = this.pending.get(token)
 		if (entry) {
 			entry.requestId = requestId
@@ -624,6 +631,12 @@ export class Session extends EventEmitter {
 
 		const token = randomUUID()
 		this.pending.set(token, { origin, jids: new Set(jids), at: now, resolve })
+		if (!resolve) {
+			// Nobody awaits a 'card' reply: drop it if the phone never answers, so a
+			// stale entry can't be matched to a later notification of the same chat.
+			setTimeout(() => this.pending.delete(token), 5 * 60_000).unref?.()
+		}
+
 		return token
 	}
 
@@ -747,11 +760,37 @@ export class Session extends EventEmitter {
 			throw new Boom('A history backfill is already running for this session', { statusCode: 409 })
 		}
 
+		// Reserve the slot BEFORE any await: two concurrent calls must not both pass
+		// the guard while the anchor scan is running.
+		const previous = this.backfill
+		this.backfill = { ...previous, running: true }
+		try {
+			return await this.prepareBackfill(opts)
+		} catch (error) {
+			this.backfill = { ...previous, running: false }
+			throw error
+		}
+	}
+
+	private async prepareBackfill(opts: {
+		days?: number
+		anchors?: HistoryAnchor[]
+		maxPagesPerChat?: number
+		intervalMs?: number
+	}): Promise<BackfillStatus> {
+		const finite = (v: number | undefined) => v === undefined || Number.isFinite(v)
+		if (!finite(opts.days) || !finite(opts.maxPagesPerChat) || !finite(opts.intervalMs)) {
+			throw new Boom('`days`, `maxPagesPerChat` and `intervalMs` must be finite numbers', { statusCode: 400 })
+		}
+
 		const days = opts.days === undefined ? config.backfill.days : Math.max(0, Math.floor(opts.days))
 		const cutoff = days ? Math.floor(Date.now() / 1000) - days * 86400 : 0
 
+		// One oldest anchor per LOGICAL chat: the same conversation may be stored under
+		// its pn and its lid; both forms map to one key (the pn when known), so it is
+		// paginated once. The anchor keeps the jid its message was stored under.
 		const byChat = new Map<string, HistoryAnchor>()
-		const consider = (a: HistoryAnchor) => {
+		const consider = async (a: HistoryAnchor) => {
 			if (!a.remoteJid || !a.id || !a.timestamp) {
 				return
 			}
@@ -761,18 +800,20 @@ export class Session extends EventEmitter {
 				return
 			}
 
-			const prev = byChat.get(jid)
+			const forms = await this.chatJidCandidates(jid)
+			const key = forms.find(f => isPnUser(f)) ?? forms[0]!
+			const prev = byChat.get(key)
 			if (!prev || a.timestamp < prev.timestamp) {
-				byChat.set(jid, { ...a, remoteJid: jid })
+				byChat.set(key, { ...a, remoteJid: jid })
 			}
 		}
 
 		for (const [chat, e] of await oldestPerChat(this.id)) {
-			consider({ id: e.id!, fromMe: e.dir === 'out', timestamp: Math.floor(e.t / 1000), remoteJid: chat })
+			await consider({ id: e.id!, fromMe: e.dir === 'out', timestamp: Math.floor(e.t / 1000), remoteJid: chat })
 		}
 
 		for (const a of opts.anchors ?? []) {
-			consider(a)
+			await consider(a)
 		}
 
 		// Chats whose oldest known message is already past the window need nothing.
