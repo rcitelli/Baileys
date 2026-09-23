@@ -13,6 +13,7 @@ export type WebhookEvent =
 	| 'connection.update'
 	| 'creds.update'
 	| 'messages.upsert'
+	| 'messaging-history.set'
 	| 'messages.update'
 	| 'messages.delete'
 	| 'message-receipt.update'
@@ -29,6 +30,7 @@ export type WebhookEvent =
 export const ALL_WEBHOOK_EVENTS: WebhookEvent[] = [
 	'connection.update',
 	'messages.upsert',
+	'messaging-history.set',
 	'messages.update',
 	'messages.delete',
 	'message-receipt.update',

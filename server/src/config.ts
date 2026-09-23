@@ -78,7 +78,13 @@ export const config = {
 		/** Per-request timeout (ms) for webhook delivery */
 		timeoutMs: num(process.env.WEBHOOK_TIMEOUT_MS, 10000),
 		/** Optional shared secret; sent as X-Webhook-Secret so receivers can verify origin */
-		secret: process.env.WEBHOOK_SECRET || undefined
+		secret: process.env.WEBHOOK_SECRET || undefined,
+		/**
+		 * Messages per POST when forwarding `messaging-history.set`. A single WhatsApp
+		 * history chunk can hold thousands of messages (MBs of JSON); splitting keeps each
+		 * delivery well inside `timeoutMs` so receivers can process it synchronously.
+		 */
+		historyBatchSize: Math.max(1, num(process.env.WEBHOOK_HISTORY_BATCH_SIZE, 100))
 	},
 
 	session: {
