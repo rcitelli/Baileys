@@ -16,7 +16,7 @@ import makeWASocket, {
 } from '../wa.js'
 import QRCode from 'qrcode'
 import { config } from '../config.js'
-import { appendHistory, queryHistory } from '../history.js'
+import { appendHistory, appendHistoryBatch, type HistoryEntry, oldestForChat, queryHistory } from '../history.js'
 import { logger } from '../logger.js'
 import type { SessionInfo, SessionMeta, SessionStatus, WebhookEvent } from '../types.js'
 import { dispatchWebhook } from '../webhooks/dispatcher.js'
@@ -31,6 +31,57 @@ interface ChatLite {
 	name?: string
 	unread?: number
 	ts?: number
+}
+
+/** Minimal shape of a WAMessage as it arrives in upsert/history events. */
+interface RawMessage {
+	key?: { id?: string; remoteJid?: string; fromMe?: boolean }
+	message?: Record<string, unknown>
+	messageTimestamp?: number | string | { toNumber?: () => number; low?: number }
+	status?: number
+}
+
+/** Shape of Baileys' `messaging-history.set` payload (the parts the server touches). */
+interface HistorySetData {
+	messages?: RawMessage[]
+	chats?: Array<{ id?: string; name?: string; conversationTimestamp?: number }>
+	contacts?: Array<{ id?: string; name?: string; notify?: string }>
+	syncType?: number
+	progress?: number | null
+	isLatest?: boolean
+	chunkOrder?: number | null
+	peerDataRequestSessionId?: string | null
+}
+
+/** Anchor for an on-demand history fetch: a message the linked device already has. */
+export interface HistoryAnchor {
+	id: string
+	fromMe: boolean
+	/** message timestamp in SECONDS (as in WAMessage.messageTimestamp) */
+	timestamp: number
+	/** chat JID the anchor belongs to (pn or lid) */
+	remoteJid?: string
+}
+
+/** WhatsApp caps each on-demand history request at 50 messages. */
+const MAX_ON_DEMAND = 50
+
+/** Seconds from a (possibly Long / string) protobuf timestamp. */
+const tsSeconds = (raw: RawMessage['messageTimestamp']): number | undefined => {
+	if (typeof raw === 'number') {
+		return raw
+	}
+
+	if (typeof raw === 'string' && raw.trim() && Number.isFinite(Number(raw))) {
+		return Number(raw)
+	}
+
+	if (raw && typeof raw === 'object') {
+		const n = raw.toNumber?.() ?? raw.low
+		return typeof n === 'number' ? n : undefined
+	}
+
+	return undefined
 }
 
 const RECONNECT_DELAY_MS = 3000
@@ -68,6 +119,10 @@ export class Session extends EventEmitter {
 	// Live, in-memory only (not persisted) — cleared on restart. Matches "live, on-demand".
 	private readonly contacts = new Map<string, ContactLite>()
 	private readonly chats = new Map<string, ChatLite>()
+
+	// History deliveries are chained so batches reach the receiver in order and one
+	// multi-thousand-message sync never floods it with parallel POSTs.
+	private historyQueue: Promise<void> = Promise.resolve()
 
 	constructor(meta: SessionMeta, paths: SessionPaths) {
 		super()
@@ -141,7 +196,13 @@ export class Session extends EventEmitter {
 					creds: state.creds,
 					keys: makeCacheableSignalKeyStore(state.keys, logger.child({ session: this.id }))
 				},
-				generateHighQualityLinkPreview: true
+				generateHighQualityLinkPreview: true,
+				// Old conversations (with content) arrive in `messaging-history.set`. The
+				// library asks for the full history but, by default, DISCARDS the FULL
+				// chunks (`syncType !== FULL`) — so only a few recent days ever surfaced.
+				// Process every chunk; receivers decide what to keep.
+				syncFullHistory: true,
+				shouldSyncHistoryMessage: () => true
 			})
 
 			this.sock = sock
@@ -174,6 +235,11 @@ export class Session extends EventEmitter {
 					continue
 				}
 
+				if (key === 'messaging-history.set') {
+					this.forwardHistory(events[key] as HistorySetData)
+					continue
+				}
+
 				this.forward(key as WebhookEvent, events[key])
 			}
 		})
@@ -182,34 +248,13 @@ export class Session extends EventEmitter {
 	/** Extract metadata-only history + maintain live contact/chat maps from events. */
 	private capture(events: Record<string, unknown>) {
 		try {
-			const upserts = events['messages.upsert'] as { messages?: unknown[] } | undefined
+			const upserts = events['messages.upsert'] as { messages?: RawMessage[] } | undefined
 			if (upserts?.messages) {
-				for (const raw of upserts.messages) {
-					const m = raw as {
-						key?: { id?: string; remoteJid?: string; fromMe?: boolean }
-						message?: Record<string, unknown>
-						messageTimestamp?: number | { toNumber?: () => number }
-						status?: number
+				for (const m of upserts.messages) {
+					const entry = this.toHistoryEntry(m)
+					if (entry) {
+						void appendHistory(this.id, entry)
 					}
-					if (!m.key?.remoteJid) {
-						continue
-					}
-
-					const rawTs = m.messageTimestamp
-					const ts =
-						typeof rawTs === 'number' ? rawTs : (rawTs?.toNumber?.() ?? Math.floor(Date.now() / 1000))
-					void appendHistory(this.id, {
-						t: ts * 1000,
-						dir: m.key.fromMe ? 'out' : 'in',
-						chat: m.key.remoteJid,
-						type: m.message ? (getContentType(m.message as never) ?? 'unknown') : 'unknown',
-						id: m.key.id,
-						status: typeof m.status === 'number' ? String(m.status) : undefined
-					})
-
-					const chat = this.chats.get(m.key.remoteJid) ?? { id: m.key.remoteJid }
-					chat.ts = ts
-					this.chats.set(m.key.remoteJid, chat)
 				}
 			}
 
@@ -240,10 +285,20 @@ export class Session extends EventEmitter {
 				}
 			}
 
-			const histSet = events['messaging-history.set'] as
-				| { contacts?: Array<{ id?: string; name?: string; notify?: string }>; chats?: Array<{ id?: string; name?: string; conversationTimestamp?: number }> }
-				| undefined
+			const histSet = events['messaging-history.set'] as HistorySetData | undefined
 			if (histSet) {
+				// Record metadata for history messages too: it is the anchor store for
+				// on-demand fetches (WhatsApp needs a message the device already has).
+				const entries: HistoryEntry[] = []
+				for (const m of histSet.messages ?? []) {
+					const entry = this.toHistoryEntry(m)
+					if (entry) {
+						entries.push(entry)
+					}
+				}
+
+				void appendHistoryBatch(this.id, entries)
+
 				for (const c of histSet.contacts ?? []) {
 					if (c.id) {
 						this.contacts.set(c.id, { id: c.id, name: c.name, notify: c.notify })
@@ -258,6 +313,30 @@ export class Session extends EventEmitter {
 			}
 		} catch (error) {
 			logger.warn({ session: this.id, err: (error as Error).message }, 'event capture failed')
+		}
+	}
+
+	/** Metadata record for one message (no content); also bumps the live chat map. */
+	private toHistoryEntry(m: RawMessage): HistoryEntry | undefined {
+		const chat = m.key?.remoteJid
+		if (!chat) {
+			return undefined
+		}
+
+		const ts = tsSeconds(m.messageTimestamp) ?? Math.floor(Date.now() / 1000)
+		const live = this.chats.get(chat) ?? { id: chat }
+		if (!live.ts || ts > live.ts) {
+			live.ts = ts
+		}
+
+		this.chats.set(chat, live)
+		return {
+			t: ts * 1000,
+			dir: m.key?.fromMe ? 'out' : 'in',
+			chat,
+			type: m.message ? (getContentType(m.message as never) ?? 'unknown') : 'unknown',
+			id: m.key?.id,
+			status: typeof m.status === 'number' ? String(m.status) : undefined
 		}
 	}
 
@@ -345,6 +424,128 @@ export class Session extends EventEmitter {
 			timestamp: new Date().toISOString(),
 			data
 		})
+	}
+
+	/**
+	 * Forward `messaging-history.set` in batches of `webhook.historyBatchSize` messages.
+	 * The first batch also carries `chats`/`contacts`; every batch carries the sync
+	 * metadata plus `part`/`parts` so receivers can tell the pieces apart. Deliveries
+	 * are chained (sequential) across syncs.
+	 */
+	private forwardHistory(data: HistorySetData) {
+		const { webhookUrl, webhookEvents } = this.meta
+		if (!webhookUrl || !webhookEvents.includes('messaging-history.set') || !data) {
+			return
+		}
+
+		const messages = data.messages ?? []
+		const size = config.webhook.historyBatchSize
+		const parts = Math.max(1, Math.ceil(messages.length / size))
+		const base = {
+			syncType: data.syncType,
+			progress: data.progress,
+			isLatest: data.isLatest,
+			chunkOrder: data.chunkOrder,
+			peerDataRequestSessionId: data.peerDataRequestSessionId
+		}
+		logger.info(
+			{ session: this.id, syncType: data.syncType, messages: messages.length, parts },
+			'forwarding history sync'
+		)
+
+		for (let i = 0; i < parts; i++) {
+			const batch = {
+				...base,
+				messages: messages.slice(i * size, (i + 1) * size),
+				chats: i === 0 ? (data.chats ?? []) : [],
+				contacts: i === 0 ? (data.contacts ?? []) : [],
+				part: i + 1,
+				parts
+			}
+			this.historyQueue = this.historyQueue.then(async () => {
+				await dispatchWebhook(webhookUrl, {
+					sessionId: this.id,
+					event: 'messaging-history.set',
+					timestamp: new Date().toISOString(),
+					data: batch
+				})
+			})
+		}
+	}
+
+	/**
+	 * Ask the phone for OLDER messages of one chat (on-demand history sync). The reply
+	 * is asynchronous: it arrives as a `messaging-history.set` event (syncType
+	 * ON_DEMAND = 6) and is forwarded to the webhook like any other history.
+	 *
+	 * `target` is a JID or a phone number. The anchor must be a message the device
+	 * already has — the caller's, or else the oldest one this server has seen for the
+	 * chat (pn and lid forms are both tried).
+	 */
+	async fetchHistory(
+		target: string,
+		count = MAX_ON_DEMAND,
+		anchor?: HistoryAnchor
+	): Promise<{ requestId: string; jid: string; anchor: HistoryAnchor }> {
+		const sock = this.requireSock()
+		const n = Math.min(Math.max(Math.floor(count) || MAX_ON_DEMAND, 1), MAX_ON_DEMAND)
+
+		let chosen: HistoryAnchor | undefined = anchor
+		if (!chosen) {
+			const candidates = await this.chatJidCandidates(target)
+			const oldest = await oldestForChat(this.id, candidates)
+			if (oldest?.id) {
+				chosen = {
+					id: oldest.id,
+					fromMe: oldest.dir === 'out',
+					timestamp: Math.floor(oldest.t / 1000),
+					remoteJid: oldest.chat
+				}
+			}
+		}
+
+		if (!chosen?.id || !chosen.timestamp) {
+			throw new Boom(
+				'No known message in this chat to anchor the history request. Send or receive one message ' +
+					'in the chat, or pass `anchor` ({ id, fromMe, timestamp }) from a message you have stored.',
+				{ statusCode: 422 }
+			)
+		}
+
+		const jid = chosen.remoteJid || (await this.chatJidCandidates(target))[0]!
+		const requestId = await sock.fetchMessageHistory(
+			n,
+			{ remoteJid: jid, fromMe: chosen.fromMe, id: chosen.id },
+			chosen.timestamp
+		)
+		logger.info({ session: this.id, jid, count: n, requestId }, 'on-demand history requested')
+		return { requestId, jid, anchor: { ...chosen, remoteJid: jid } }
+	}
+
+	/** JIDs a chat may be keyed under: the given jid, or pn jid + its mapped lid. */
+	private async chatJidCandidates(target: string): Promise<string[]> {
+		const value = String(target).trim()
+		if (value.includes('@')) {
+			return [value]
+		}
+
+		const digits = value.replace(/[^0-9]/g, '')
+		if (!digits) {
+			throw new Boom('Invalid chat — pass a JID or a phone number', { statusCode: 400 })
+		}
+
+		const pn = `${digits}@s.whatsapp.net`
+		const out = [pn]
+		try {
+			const lid = await this.sock?.signalRepository.lidMapping.getLIDForPN(pn)
+			if (lid) {
+				out.push(jidNormalizedUser(lid))
+			}
+		} catch {
+			// mapping is best-effort
+		}
+
+		return out
 	}
 
 	private requireSock(): WASocket {

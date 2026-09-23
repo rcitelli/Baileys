@@ -112,6 +112,7 @@ curl -X POST https://wpp.elosolar.com.br/api/sessions/vendas/send \\
 | GET | \`/api/sessions/:id/contacts\` | Contatos conhecidos (ao vivo, em memória — não persistido). |
 | GET | \`/api/sessions/:id/chats\` | Conversas conhecidas (ao vivo, em memória). |
 | GET | \`/api/sessions/:id/history?limit=100\` | Histórico de interações — **metadados apenas** (sem conteúdo). |
+| POST | \`/api/sessions/:id/history/fetch\` | Pede ao celular mensagens **mais antigas** de uma conversa (até 50 por pedido). Body: \`{ jid \| to, count?, anchor? }\`. Responde \`202\`; as mensagens chegam **depois**, pelo webhook \`messaging-history.set\` (\`syncType\` 6). \`anchor\` = \`{ id, fromMe, timestamp }\` de uma mensagem que você já tem; sem ele, o servidor usa a mais antiga que conhece da conversa. |
 
 Registro de histórico:
 \`\`\`json
@@ -150,6 +151,8 @@ Cada sessão pode ter uma \`webhookUrl\`. Em cada evento inscrito, o servidor fa
 Headers: \`X-Webhook-Event\`, \`X-Webhook-Session\` e, se configurado, \`X-Webhook-Secret\` (valide no destino). Entregas com falha são reenviadas com backoff exponencial.
 
 **Eventos disponíveis:** ${events}.
+
+**Histórico (\`messaging-history.set\`).** Conversas antigas, **com conteúdo**, chegam neste evento: ao parear um número (sincronização completa) e em resposta a \`/history/fetch\`. Lotes grandes são divididos em vários \`POST\`s de até \`WEBHOOK_HISTORY_BATCH_SIZE\` mensagens (padrão 100), entregues em ordem. Cada lote traz \`data.messages\`, \`syncType\` (0 bootstrap, 2 completo, 3 recente, 6 sob demanda), \`progress\`, \`part\` e \`parts\`; \`chats\`/\`contacts\` vêm só no 1º lote. Inscreva o evento em \`webhookEvents\` para recebê-lo.
 
 ---
 
