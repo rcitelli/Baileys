@@ -160,6 +160,46 @@ export const oldestForChat = async (sessionId: string, jids: string[]): Promise<
 	return undefined
 }
 
+/**
+ * Oldest known message (with an id) PER CHAT across every stored day. These are the
+ * anchors a history backfill pages backwards from — one full scan instead of one
+ * `oldestForChat` scan per chat.
+ */
+export const oldestPerChat = async (sessionId: string): Promise<Map<string, HistoryEntry>> => {
+	const out = new Map<string, HistoryEntry>()
+	const dir = historyDir(sessionId)
+	let files: string[]
+	try {
+		files = (await readdir(dir)).filter(f => f.endsWith('.jsonl'))
+	} catch {
+		return out
+	}
+
+	for (const file of files) {
+		try {
+			for (const line of (await readFile(join(dir, file), 'utf-8')).split('\n')) {
+				if (!line) {
+					continue
+				}
+
+				try {
+					const entry = JSON.parse(line) as HistoryEntry
+					const prev = out.get(entry.chat)
+					if (entry.id && (!prev || entry.t < prev.t)) {
+						out.set(entry.chat, entry)
+					}
+				} catch {
+					// skip malformed line
+				}
+			}
+		} catch {
+			// skip unreadable file
+		}
+	}
+
+	return out
+}
+
 /** Delete metadata files older than the retention window, across all sessions. */
 export const cleanupHistory = async (): Promise<void> => {
 	if (!config.history.enabled) {

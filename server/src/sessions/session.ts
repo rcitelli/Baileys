@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { Boom } from '@hapi/boom'
 import makeWASocket, {
 	type AnyMessageContent,
@@ -11,6 +13,7 @@ import makeWASocket, {
 	isPnUser,
 	jidNormalizedUser,
 	makeCacheableSignalKeyStore,
+	proto,
 	type MiscMessageGenerationOptions,
 	useMultiFileAuthState,
 	type WAMessageKey,
@@ -18,7 +21,14 @@ import makeWASocket, {
 } from '../wa.js'
 import QRCode from 'qrcode'
 import { config } from '../config.js'
-import { appendHistory, appendHistoryBatch, type HistoryEntry, oldestForChat, queryHistory } from '../history.js'
+import {
+	appendHistory,
+	appendHistoryBatch,
+	type HistoryEntry,
+	oldestForChat,
+	oldestPerChat,
+	queryHistory
+} from '../history.js'
 import { logger } from '../logger.js'
 import type { SessionInfo, SessionMeta, SessionStatus, WebhookEvent } from '../types.js'
 import { dispatchWebhook } from '../webhooks/dispatcher.js'
@@ -67,6 +77,48 @@ export interface HistoryAnchor {
 
 /** WhatsApp caps each on-demand history request at 50 messages. */
 const MAX_ON_DEMAND = 50
+/** syncType of an on-demand (single chat) history reply */
+const SYNC_ON_DEMAND = 6
+
+/** Who asked for an on-demand history reply — echoed on the forwarded batches. */
+export type HistoryOrigin = 'card' | 'backfill'
+
+interface PendingOnDemand {
+	origin: HistoryOrigin
+	/** chat JIDs the reply may be keyed under (pn and lid) */
+	jids: Set<string>
+	requestId?: string
+	at: number
+	resolve?: (messages: RawMessage[]) => void
+}
+
+/** Full-history request sent to the phone (FULL_HISTORY_SYNC_ON_DEMAND). */
+export interface FullSyncStatus {
+	requestId: string
+	requestedAt: string
+	days?: number
+	/** phone's answer: REQUEST_SUCCESS, DECLINED_SHARING_HISTORY, ERROR_REQUEST_ON_NON_SMB_PRIMARY, ... */
+	response?: string
+	respondedAt?: string
+}
+
+/** Progress of the chat-by-chat backfill job. */
+export interface BackfillStatus {
+	running: boolean
+	startedAt?: string
+	finishedAt?: string
+	days: number
+	chats: number
+	chatsDone: number
+	requests: number
+	messages: number
+	timeouts: number
+	current?: string
+	stoppedReason?: string
+}
+
+const IGNORED_CHAT = (jid: string) =>
+	jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid.endsWith('@newsletter') || jid.startsWith('status@')
 
 /** Seconds from a (possibly Long / string) protobuf timestamp. */
 const tsSeconds = (raw: RawMessage['messageTimestamp']): number | undefined => {
@@ -125,6 +177,20 @@ export class Session extends EventEmitter {
 	// History deliveries are chained so batches reach the receiver in order and one
 	// multi-thousand-message sync never floods it with parallel POSTs.
 	private historyQueue: Promise<void> = Promise.resolve()
+
+	// On-demand history requests awaiting the phone's reply (correlation + origin tag).
+	private readonly pending = new Map<string, PendingOnDemand>()
+	private fullSync?: FullSyncStatus
+	private backfill: BackfillStatus = {
+		running: false,
+		days: 0,
+		chats: 0,
+		chatsDone: 0,
+		requests: 0,
+		messages: 0,
+		timeouts: 0
+	}
+	private backfillStop = false
 
 	constructor(meta: SessionMeta, paths: SessionPaths) {
 		super()
@@ -238,7 +304,8 @@ export class Session extends EventEmitter {
 				}
 
 				if (key === 'messaging-history.set') {
-					this.forwardHistory(events[key] as HistorySetData)
+					const data = events[key] as HistorySetData
+					this.forwardHistory(data, this.settlePending(data))
 					continue
 				}
 
@@ -253,6 +320,7 @@ export class Session extends EventEmitter {
 			const upserts = events['messages.upsert'] as { messages?: RawMessage[] } | undefined
 			if (upserts?.messages) {
 				for (const m of upserts.messages) {
+					this.captureFullSyncResponse(m)
 					const entry = this.toHistoryEntry(m)
 					if (entry) {
 						void appendHistory(this.id, entry)
@@ -434,7 +502,7 @@ export class Session extends EventEmitter {
 	 * metadata plus `part`/`parts` so receivers can tell the pieces apart. Deliveries
 	 * are chained (sequential) across syncs.
 	 */
-	private forwardHistory(data: HistorySetData) {
+	private forwardHistory(data: HistorySetData, origin?: HistoryOrigin) {
 		const { webhookUrl, webhookEvents } = this.meta
 		if (!webhookUrl || !webhookEvents.includes('messaging-history.set') || !data) {
 			return
@@ -448,10 +516,12 @@ export class Session extends EventEmitter {
 			progress: data.progress,
 			isLatest: data.isLatest,
 			chunkOrder: data.chunkOrder,
-			peerDataRequestSessionId: data.peerDataRequestSessionId
+			peerDataRequestSessionId: data.peerDataRequestSessionId,
+			// on-demand replies only: 'card' (one chat, asked explicitly) or 'backfill'
+			...(origin ? { origin } : {})
 		}
 		logger.info(
-			{ session: this.id, syncType: data.syncType, messages: messages.length, parts },
+			{ session: this.id, syncType: data.syncType, messages: messages.length, parts, origin },
 			'forwarding history sync'
 		)
 
@@ -487,7 +557,8 @@ export class Session extends EventEmitter {
 	async fetchHistory(
 		target: string,
 		count = MAX_ON_DEMAND,
-		anchor?: HistoryAnchor
+		anchor?: HistoryAnchor,
+		origin: HistoryOrigin = 'card'
 	): Promise<{ requestId: string; jid: string; anchor: HistoryAnchor }> {
 		const sock = this.requireSock()
 		const n = Math.min(Math.max(Math.floor(count) || MAX_ON_DEMAND, 1), MAX_ON_DEMAND)
@@ -515,13 +586,375 @@ export class Session extends EventEmitter {
 		}
 
 		const jid = chosen.remoteJid || (await this.chatJidCandidates(target))[0]!
-		const requestId = await sock.fetchMessageHistory(
-			n,
-			{ remoteJid: jid, fromMe: chosen.fromMe, id: chosen.id },
-			chosen.timestamp
-		)
+		const token = this.registerPending(origin, await this.chatJidCandidates(jid))
+		let requestId: string
+		try {
+			requestId = await sock.fetchMessageHistory(
+				n,
+				{ remoteJid: jid, fromMe: chosen.fromMe, id: chosen.id },
+				chosen.timestamp
+			)
+		} catch (error) {
+			this.pending.delete(token)
+			throw error
+		}
+
+		const entry = this.pending.get(token)
+		if (entry) {
+			entry.requestId = requestId
+		}
 		logger.info({ session: this.id, jid, count: n, requestId }, 'on-demand history requested')
 		return { requestId, jid, anchor: { ...chosen, remoteJid: jid } }
+	}
+
+	// ---------------------------------------------------------------------------
+	// History without re-pairing
+	//
+	// WhatsApp only pushes the full history when a device is LINKED. An already-
+	// linked device (this one) can still pull it two ways, both answered by the
+	// phone as `messaging-history.set` and forwarded like any other history:
+	//   1. FULL_HISTORY_SYNC_ON_DEMAND — one request for the whole history
+	//      (`requestFullHistory`). The phone may refuse (its answer is captured).
+	//   2. HISTORY_SYNC_ON_DEMAND per chat — "load older messages", 50 at a time,
+	//      anchored on the oldest message we know (`startBackfill`). This is what
+	//      WhatsApp Web does when you scroll up.
+	// ---------------------------------------------------------------------------
+
+	/** Track an on-demand request so its reply can be tagged (and awaited). */
+	private registerPending(origin: HistoryOrigin, jids: string[], resolve?: PendingOnDemand['resolve']): string {
+		const now = Date.now()
+		for (const [key, p] of this.pending) {
+			if (now - p.at > 5 * 60_000) {
+				this.pending.delete(key)
+			}
+		}
+
+		const token = randomUUID()
+		this.pending.set(token, { origin, jids: new Set(jids), at: now, resolve })
+		if (!resolve) {
+			// Nobody awaits a 'card' reply: drop it if the phone never answers, so a
+			// stale entry can't be matched to a later notification of the same chat.
+			setTimeout(() => this.pending.delete(token), 5 * 60_000).unref?.()
+		}
+
+		return token
+	}
+
+	/**
+	 * Match an on-demand history reply to its request — by request id when the phone
+	 * echoes it, else by chat. Resolves a waiting backfill and returns the origin.
+	 */
+	private settlePending(data: HistorySetData): HistoryOrigin | undefined {
+		if (!data || data.syncType !== SYNC_ON_DEMAND) {
+			return undefined
+		}
+
+		const chats = new Set<string>()
+		for (const m of data.messages ?? []) {
+			if (m.key?.remoteJid) {
+				chats.add(jidNormalizedUser(m.key.remoteJid))
+			}
+		}
+
+		let match: [string, PendingOnDemand] | undefined
+		for (const entry of this.pending) {
+			if (data.peerDataRequestSessionId && entry[1].requestId === data.peerDataRequestSessionId) {
+				match = entry
+				break
+			}
+		}
+
+		if (!match) {
+			for (const entry of this.pending) {
+				if ([...entry[1].jids].some(j => chats.has(j))) {
+					match = entry
+					break
+				}
+			}
+		}
+
+		if (!match) {
+			return undefined
+		}
+
+		this.pending.delete(match[0])
+		match[1].resolve?.(data.messages ?? [])
+		return match[1].origin
+	}
+
+	/** The phone's answer to FULL_HISTORY_SYNC_ON_DEMAND arrives as a protocol message. */
+	private captureFullSyncResponse(m: RawMessage) {
+		type FullResp = { requestMetadata?: { requestId?: string | null } | null; responseCode?: number | null }
+		const pdo = (
+			m.message as
+				| {
+						protocolMessage?: {
+							peerDataOperationRequestResponseMessage?: {
+								peerDataOperationResult?: Array<{ fullHistorySyncOnDemandRequestResponse?: FullResp | null }>
+							}
+						}
+				  }
+				| undefined
+		)?.protocolMessage?.peerDataOperationRequestResponseMessage
+		for (const result of pdo?.peerDataOperationResult ?? []) {
+			const resp = result?.fullHistorySyncOnDemandRequestResponse
+			if (!resp) {
+				continue
+			}
+
+			const codes = proto.Message.PeerDataOperationRequestResponseMessage.PeerDataOperationResult
+				.FullHistorySyncOnDemandResponseCode as unknown as Record<number, string>
+			const code = resp.responseCode ?? 0
+			const name = codes[code] ?? String(code)
+			const reqId = resp.requestMetadata?.requestId
+			if (this.fullSync && (!reqId || reqId === this.fullSync.requestId)) {
+				this.fullSync.response = name
+				this.fullSync.respondedAt = new Date().toISOString()
+			}
+
+			logger.info({ session: this.id, response: name }, 'full history sync: phone answered')
+		}
+	}
+
+	/** Ask the phone for the WHOLE history, without re-pairing (see block comment). */
+	async requestFullHistory(days?: number): Promise<FullSyncStatus> {
+		const sock = this.requireSock()
+		const limit = days && days > 0 ? Math.floor(days) : undefined
+		const requestId = randomUUID()
+		await sock.sendPeerDataOperationMessage({
+			peerDataOperationRequestType: proto.Message.PeerDataOperationRequestType.FULL_HISTORY_SYNC_ON_DEMAND,
+			fullHistorySyncOnDemandRequest: {
+				requestMetadata: { requestId },
+				historySyncConfig: {
+					fullSyncDaysLimit: limit,
+					storageQuotaMb: 10240,
+					inlineInitialPayloadInE2EeMsg: true,
+					supportBizHostedMsg: true,
+					supportRecentSyncChunkMessageCountTuning: true,
+					supportMessageAssociation: true,
+					onDemandReady: true,
+					completeOnDemandReady: true
+				}
+			}
+		})
+		this.fullSync = { requestId, requestedAt: new Date().toISOString(), days: limit }
+		logger.info({ session: this.id, requestId, days: limit }, 'full history sync requested')
+		return { ...this.fullSync }
+	}
+
+	/**
+	 * Pull older messages chat by chat, paging backwards from the oldest known
+	 * message of each chat until the window (`days`), the per-chat page cap, or the
+	 * start of the conversation. Runs in the background; progress via
+	 * `getHistorySyncStatus`. Anchors come from this server's metadata store plus
+	 * any the caller supplies (e.g. from its own database).
+	 */
+	async startBackfill(opts: {
+		days?: number
+		anchors?: HistoryAnchor[]
+		maxPagesPerChat?: number
+		intervalMs?: number
+	}): Promise<BackfillStatus> {
+		this.requireSock()
+		if (this.backfill.running) {
+			throw new Boom('A history backfill is already running for this session', { statusCode: 409 })
+		}
+
+		// Reserve the slot BEFORE any await: two concurrent calls must not both pass
+		// the guard while the anchor scan is running.
+		const previous = this.backfill
+		this.backfill = { ...previous, running: true }
+		try {
+			return await this.prepareBackfill(opts)
+		} catch (error) {
+			this.backfill = { ...previous, running: false }
+			throw error
+		}
+	}
+
+	private async prepareBackfill(opts: {
+		days?: number
+		anchors?: HistoryAnchor[]
+		maxPagesPerChat?: number
+		intervalMs?: number
+	}): Promise<BackfillStatus> {
+		const finite = (v: number | undefined) => v === undefined || Number.isFinite(v)
+		if (!finite(opts.days) || !finite(opts.maxPagesPerChat) || !finite(opts.intervalMs)) {
+			throw new Boom('`days`, `maxPagesPerChat` and `intervalMs` must be finite numbers', { statusCode: 400 })
+		}
+
+		const days = opts.days === undefined ? config.backfill.days : Math.max(0, Math.floor(opts.days))
+		const cutoff = days ? Math.floor(Date.now() / 1000) - days * 86400 : 0
+
+		// One oldest anchor per LOGICAL chat: the same conversation may be stored under
+		// its pn and its lid; both forms map to one key (the pn when known), so it is
+		// paginated once. The anchor keeps the jid its message was stored under.
+		const byChat = new Map<string, HistoryAnchor>()
+		const consider = async (a: HistoryAnchor) => {
+			if (!a.remoteJid || !a.id || !a.timestamp) {
+				return
+			}
+
+			const jid = jidNormalizedUser(a.remoteJid)
+			if (!jid || IGNORED_CHAT(jid)) {
+				return
+			}
+
+			const forms = await this.chatJidCandidates(jid)
+			const key = forms.find(f => isPnUser(f)) ?? forms[0]!
+			const prev = byChat.get(key)
+			if (!prev || a.timestamp < prev.timestamp) {
+				byChat.set(key, { ...a, remoteJid: jid })
+			}
+		}
+
+		for (const [chat, e] of await oldestPerChat(this.id)) {
+			await consider({ id: e.id!, fromMe: e.dir === 'out', timestamp: Math.floor(e.t / 1000), remoteJid: chat })
+		}
+
+		for (const a of opts.anchors ?? []) {
+			await consider(a)
+		}
+
+		// Chats whose oldest known message is already past the window need nothing.
+		const work = [...byChat.values()].filter(a => !cutoff || a.timestamp > cutoff)
+		work.sort((a, b) => b.timestamp - a.timestamp) // most recent conversations first
+
+		this.backfillStop = false
+		this.backfill = {
+			running: true,
+			startedAt: new Date().toISOString(),
+			days,
+			chats: work.length,
+			chatsDone: 0,
+			requests: 0,
+			messages: 0,
+			timeouts: 0
+		}
+		logger.info({ session: this.id, chats: work.length, days }, 'history backfill started')
+		void this.runBackfill(work, {
+			cutoff,
+			maxPages: Math.max(1, Math.floor(opts.maxPagesPerChat ?? config.backfill.maxPagesPerChat)),
+			intervalMs: Math.max(250, Math.floor(opts.intervalMs ?? config.backfill.intervalMs))
+		})
+		return this.getBackfillStatus()
+	}
+
+	private async runBackfill(
+		work: HistoryAnchor[],
+		{ cutoff, maxPages, intervalMs }: { cutoff: number; maxPages: number; intervalMs: number }
+	) {
+		let reason = 'done'
+		try {
+			for (const first of work) {
+				if (this.backfillStop) {
+					reason = 'stopped'
+					break
+				}
+
+				if (!this.isOpen()) {
+					reason = 'session disconnected'
+					break
+				}
+
+				this.backfill.current = first.remoteJid
+				let anchor = first
+				for (let page = 0; page < maxPages && !this.backfillStop && this.isOpen(); page++) {
+					const messages = await this.onDemandAndWait(anchor)
+					this.backfill.requests++
+					if (!messages) {
+						this.backfill.timeouts++
+						break
+					}
+
+					this.backfill.messages += messages.length
+					let oldest: HistoryAnchor | undefined
+					for (const m of messages) {
+						const ts = tsSeconds(m.messageTimestamp)
+						if (m.key?.id && ts && (!oldest || ts < oldest.timestamp)) {
+							oldest = { id: m.key.id, fromMe: Boolean(m.key.fromMe), timestamp: ts, remoteJid: anchor.remoteJid }
+						}
+					}
+
+					// start of the conversation, or no progress → next chat
+					if (!oldest || oldest.timestamp >= anchor.timestamp || messages.length < MAX_ON_DEMAND) {
+						break
+					}
+
+					anchor = oldest
+					if (cutoff && oldest.timestamp < cutoff) {
+						break // past the window
+					}
+
+					await sleep(intervalMs)
+				}
+
+				this.backfill.chatsDone++
+				await sleep(intervalMs)
+			}
+
+			if (this.backfillStop) {
+				reason = 'stopped'
+			}
+		} catch (error) {
+			reason = `error: ${(error as Error).message}`
+			logger.warn({ session: this.id, err: (error as Error).message }, 'history backfill failed')
+		} finally {
+			this.backfill.running = false
+			this.backfill.current = undefined
+			this.backfill.finishedAt = new Date().toISOString()
+			this.backfill.stoppedReason = reason
+			logger.info({ session: this.id, ...this.backfill }, 'history backfill finished')
+		}
+	}
+
+	/** One on-demand request, resolved with the phone's reply (or undefined on timeout). */
+	private async onDemandAndWait(anchor: HistoryAnchor): Promise<RawMessage[] | undefined> {
+		const sock = this.requireSock()
+		const jid = anchor.remoteJid!
+		let settle!: (messages: RawMessage[] | undefined) => void
+		const reply = new Promise<RawMessage[] | undefined>(r => (settle = r))
+		const token = this.registerPending('backfill', await this.chatJidCandidates(jid), msgs => settle(msgs))
+		const timer = setTimeout(() => {
+			this.pending.delete(token)
+			settle(undefined)
+		}, config.backfill.timeoutMs)
+		try {
+			const requestId = await sock.fetchMessageHistory(
+				MAX_ON_DEMAND,
+				{ remoteJid: jid, fromMe: anchor.fromMe, id: anchor.id },
+				anchor.timestamp
+			)
+			const entry = this.pending.get(token)
+			if (entry) {
+				entry.requestId = requestId
+			}
+		} catch (error) {
+			clearTimeout(timer)
+			this.pending.delete(token)
+			throw error
+		}
+
+		const messages = await reply
+		clearTimeout(timer)
+		return messages
+	}
+
+	stopBackfill(): BackfillStatus {
+		this.backfillStop = true
+		return this.getBackfillStatus()
+	}
+
+	getBackfillStatus(): BackfillStatus {
+		return { ...this.backfill }
+	}
+
+	getHistorySyncStatus() {
+		return {
+			platform: this.sock?.authState.creds.platform ?? null,
+			full: this.fullSync ? { ...this.fullSync } : null,
+			backfill: this.getBackfillStatus()
+		}
 	}
 
 	/**

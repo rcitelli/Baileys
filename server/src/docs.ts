@@ -112,6 +112,10 @@ curl -X POST https://wpp.elosolar.com.br/api/sessions/vendas/send \\
 | GET | \`/api/sessions/:id/contacts\` | Contatos conhecidos (ao vivo, em memória — não persistido). |
 | GET | \`/api/sessions/:id/chats\` | Conversas conhecidas (ao vivo, em memória). |
 | GET | \`/api/sessions/:id/history?limit=100\` | Histórico de interações — **metadados apenas** (sem conteúdo). |
+| POST | \`/api/sessions/:id/history/full\` | **Histórico completo sem re-parear**: pede ao celular todo o histórico (\`FULL_HISTORY_SYNC_ON_DEMAND\`). Body: \`{ days? }\`. Responde \`202\`; o histórico chega pelo webhook \`messaging-history.set\`. A resposta do celular (aceitou/recusou) aparece em \`/history/sync\`. |
+| POST | \`/api/sessions/:id/history/backfill\` | **Backfill sem re-parear**: para cada conversa com alguma mensagem conhecida, busca as mais antigas de 50 em 50 até \`days\` (padrão \`BACKFILL_DAYS\`=90). Body: \`{ days?, anchors?, maxPagesPerChat?, intervalMs? }\` — \`anchors\` (\`[{ remoteJid, id, fromMe, timestamp }]\`) acrescenta conversas que o servidor não conhece. Roda em segundo plano; os lotes chegam com \`origin: "backfill"\`. |
+| DELETE | \`/api/sessions/:id/history/backfill\` | Interrompe o backfill em andamento. |
+| GET | \`/api/sessions/:id/history/sync\` | Estado: \`{ platform, full, backfill }\` — resposta do celular ao pedido completo e progresso do backfill (conversas, pedidos, mensagens, timeouts). |
 | POST | \`/api/sessions/:id/history/fetch\` | Pede ao celular mensagens **mais antigas** de uma conversa (até 50 por pedido). Body: \`{ jid \| to, count?, anchor? }\`. Responde \`202\`; as mensagens chegam **depois**, pelo webhook \`messaging-history.set\` (\`syncType\` 6). \`anchor\` = \`{ id, fromMe, timestamp }\` de uma mensagem que você já tem; sem ele, o servidor usa a mais antiga que conhece da conversa. |
 
 Registro de histórico:

@@ -87,6 +87,18 @@ export const config = {
 		historyBatchSize: Math.max(1, num(process.env.WEBHOOK_HISTORY_BATCH_SIZE, 100))
 	},
 
+	/** History backfill (older messages pulled chat by chat, without re-pairing) */
+	backfill: {
+		/** Default window: stop paging a chat once messages are older than this (0 = no limit) */
+		days: Math.max(0, num(process.env.BACKFILL_DAYS, 90)),
+		/** Pause between on-demand requests to the phone (avoid hammering it) */
+		intervalMs: Math.max(250, num(process.env.BACKFILL_INTERVAL_MS, 2500)),
+		/** How long to wait for the phone to answer one on-demand request */
+		timeoutMs: Math.max(5000, num(process.env.BACKFILL_TIMEOUT_MS, 45000)),
+		/** Max 50-message pages per chat in one run */
+		maxPagesPerChat: Math.max(1, num(process.env.BACKFILL_MAX_PAGES, 40))
+	},
+
 	session: {
 		/** Automatically reconnect sessions on startup */
 		autostart: bool(process.env.SESSION_AUTOSTART, true),
