@@ -16,6 +16,7 @@ import makeWASocket, {
 	proto,
 	type MiscMessageGenerationOptions,
 	useMultiFileAuthState,
+	type WAMessage,
 	type WAMessageKey,
 	type WASocket
 } from '../wa.js'
@@ -32,6 +33,7 @@ import {
 import { logger } from '../logger.js'
 import type { SessionInfo, SessionMeta, SessionStatus, WebhookEvent } from '../types.js'
 import { dispatchWebhook } from '../webhooks/dispatcher.js'
+import { summarizeMessage } from './serialize.js'
 
 interface ContactLite {
 	id: string
@@ -79,6 +81,33 @@ export interface HistoryAnchor {
 const MAX_ON_DEMAND = 50
 /** syncType of an on-demand (single chat) history reply */
 const SYNC_ON_DEMAND = 6
+
+export interface ReadHistoryOptions {
+	/** messages per page (1-50, default 50) */
+	count?: number
+	/** oldest message the caller already has; default: oldest known to the server */
+	anchor?: HistoryAnchor
+	/** keep paging back until the start of the chat / limits */
+	full?: boolean
+	/** page cap when `full` (default 20, max 200) */
+	maxPages?: number
+	/** stop once messages are older than this many days (0/undefined = no limit) */
+	days?: number
+}
+
+export interface ReadHistoryResult {
+	chat: string
+	/** anchor the read started from */
+	anchor: HistoryAnchor
+	messages: ReturnType<typeof summarizeMessage>[]
+	/** pass back as `anchor` to continue further back */
+	nextCursor?: HistoryAnchor
+	hasMore: boolean
+	/** true when the start of the conversation was reached */
+	complete: boolean
+	pages: number
+	stoppedReason: 'single-page' | 'start-of-chat' | 'page-limit' | 'days' | 'time-budget' | 'timeout'
+}
 
 /** Who asked for an on-demand history reply — echoed on the forwarded batches. */
 export type HistoryOrigin = 'card' | 'backfill'
@@ -177,6 +206,8 @@ export class Session extends EventEmitter {
 	// History deliveries are chained so batches reach the receiver in order and one
 	// multi-thousand-message sync never floods it with parallel POSTs.
 	private historyQueue: Promise<void> = Promise.resolve()
+	/** Serialises synchronous history reads so each reply maps to exactly one caller. */
+	private readQueue: Promise<unknown> = Promise.resolve()
 
 	// On-demand history requests awaiting the phone's reply (correlation + origin tag).
 	private readonly pending = new Map<string, PendingOnDemand>()
@@ -592,7 +623,8 @@ export class Session extends EventEmitter {
 			requestId = await sock.fetchMessageHistory(
 				n,
 				{ remoteJid: jid, fromMe: chosen.fromMe, id: chosen.id },
-				chosen.timestamp
+				// the protocol field is oldestMsgTimestampMs — anchors are kept in seconds
+				chosen.timestamp * 1000
 			)
 		} catch (error) {
 			this.pending.delete(token)
@@ -670,6 +702,16 @@ export class Session extends EventEmitter {
 					match = entry
 					break
 				}
+			}
+		}
+
+		// An EMPTY reply (start of the chat) carries no messages to match by chat. When the
+		// phone does not echo the request id either, hand it to the single request that is
+		// actively waiting, instead of letting that caller stall until its timeout.
+		if (!match && chats.size === 0 && !data.peerDataRequestSessionId) {
+			const waiting = [...this.pending].filter(([, p]) => p.resolve)
+			if (waiting.length === 1) {
+				match = waiting[0]
 			}
 		}
 
@@ -909,21 +951,27 @@ export class Session extends EventEmitter {
 	}
 
 	/** One on-demand request, resolved with the phone's reply (or undefined on timeout). */
-	private async onDemandAndWait(anchor: HistoryAnchor): Promise<RawMessage[] | undefined> {
+	private async onDemandAndWait(
+		anchor: HistoryAnchor,
+		opts: { count?: number; origin?: HistoryOrigin; timeoutMs?: number } = {}
+	): Promise<RawMessage[] | undefined> {
 		const sock = this.requireSock()
 		const jid = anchor.remoteJid!
 		let settle!: (messages: RawMessage[] | undefined) => void
 		const reply = new Promise<RawMessage[] | undefined>(r => (settle = r))
-		const token = this.registerPending('backfill', await this.chatJidCandidates(jid), msgs => settle(msgs))
+		const token = this.registerPending(opts.origin ?? 'backfill', await this.chatJidCandidates(jid), msgs =>
+			settle(msgs)
+		)
 		const timer = setTimeout(() => {
 			this.pending.delete(token)
 			settle(undefined)
-		}, config.backfill.timeoutMs)
+		}, opts.timeoutMs ?? config.backfill.timeoutMs)
 		try {
 			const requestId = await sock.fetchMessageHistory(
-				MAX_ON_DEMAND,
+				opts.count ?? MAX_ON_DEMAND,
 				{ remoteJid: jid, fromMe: anchor.fromMe, id: anchor.id },
-				anchor.timestamp
+				// the protocol field is oldestMsgTimestampMs — anchors are kept in seconds
+				anchor.timestamp * 1000
 			)
 			const entry = this.pending.get(token)
 			if (entry) {
@@ -938,6 +986,128 @@ export class Session extends EventEmitter {
 		const messages = await reply
 		clearTimeout(timer)
 		return messages
+	}
+
+	/**
+	 * Read one chat's history SYNCHRONOUSLY: ask the phone for messages older than an
+	 * anchor and return them in the response (they are also forwarded to the webhook,
+	 * tagged origin 'card'). `full` keeps paging back — up to `maxPages`, the `days`
+	 * window, the start of the chat or the time budget — and hands back `nextCursor`
+	 * so the caller can continue. Content is passed through, never stored.
+	 */
+	readChatHistory(target: string, opts: ReadHistoryOptions = {}): Promise<ReadHistoryResult> {
+		const run = this.readQueue.then(() => this.runReadHistory(target, opts))
+		this.readQueue = run.catch(() => undefined)
+		return run
+	}
+
+	private async runReadHistory(target: string, opts: ReadHistoryOptions): Promise<ReadHistoryResult> {
+		this.requireSock()
+		const started = Date.now()
+		const count = Math.min(Math.max(Math.floor(opts.count ?? MAX_ON_DEMAND) || MAX_ON_DEMAND, 1), MAX_ON_DEMAND)
+		const maxPages = opts.full ? Math.min(Math.max(Math.floor(opts.maxPages ?? 20) || 20, 1), 200) : 1
+		const cutoff = opts.days && opts.days > 0 ? Math.floor(Date.now() / 1000) - opts.days * 86400 : 0
+
+		const candidates = await this.chatJidCandidates(target)
+		const known = await oldestForChat(this.id, candidates)
+		let anchor: HistoryAnchor | undefined
+		if (opts.anchor) {
+			anchor = { ...opts.anchor, remoteJid: opts.anchor.remoteJid ?? known?.chat ?? candidates[0] }
+		} else if (known?.id) {
+			anchor = { id: known.id, fromMe: known.dir === 'out', timestamp: Math.floor(known.t / 1000), remoteJid: known.chat }
+		}
+
+		if (!anchor?.id || !anchor.timestamp) {
+			throw new Boom(
+				'No known message in this chat to page back from. Send or receive one message in the chat, ' +
+					'or pass `anchor` ({ id, fromMe, timestamp }) from the oldest message you have stored.',
+				{ statusCode: 422 }
+			)
+		}
+
+		const chatJids = new Set([...candidates, anchor.remoteJid!])
+		const first = anchor
+		const seen = new Set<string>([first.id])
+		const collected: RawMessage[] = []
+		let pages = 0
+		let reachedStart = false
+		let stoppedReason: ReadHistoryResult['stoppedReason'] = opts.full ? 'page-limit' : 'single-page'
+
+		for (; pages < maxPages; ) {
+			const remaining = config.history.readBudgetMs - (Date.now() - started)
+			if (pages > 0 && remaining < 5000) {
+				stoppedReason = 'time-budget'
+				break
+			}
+
+			const reply = await this.onDemandAndWait(anchor, {
+				count,
+				origin: 'card',
+				timeoutMs: Math.min(config.backfill.timeoutMs, Math.max(remaining, 5000))
+			})
+			if (!reply) {
+				if (pages === 0) {
+					throw new Boom('The phone did not answer the history request in time (it must be online)', {
+						statusCode: 504
+					})
+				}
+
+				stoppedReason = 'timeout'
+				break
+			}
+
+			pages++
+			// Keep this chat only (defensive: a stale reply for another chat is dropped).
+			const page = reply.filter(m => m.key?.remoteJid && chatJids.has(jidNormalizedUser(m.key.remoteJid)))
+			// If nothing matched our JIDs, the reply was correlated by request id; accept it only
+			// when it is a single chat (the phone addressed it in a form we could not map).
+			const singleChat = new Set(reply.map(m => m.key?.remoteJid)).size === 1
+			const accepted = page.length ? page : singleChat ? reply : []
+			const fresh = accepted.filter(m => m.key?.id && !seen.has(m.key.id))
+			let oldest: HistoryAnchor | undefined
+			for (const m of fresh) {
+				seen.add(m.key!.id!)
+				collected.push(m)
+				const ts = tsSeconds(m.messageTimestamp)
+				if (ts && (!oldest || ts < oldest.timestamp)) {
+					oldest = { id: m.key!.id!, fromMe: Boolean(m.key!.fromMe), timestamp: ts, remoteJid: anchor.remoteJid }
+				}
+			}
+
+			// A short page, or one that does not go further back, is the start of the chat.
+			if (!oldest || oldest.timestamp > anchor.timestamp || reply.length < count) {
+				reachedStart = true
+				stoppedReason = 'start-of-chat'
+				if (oldest) {
+					anchor = oldest
+				}
+
+				break
+			}
+
+			anchor = oldest
+			if (cutoff && oldest.timestamp < cutoff) {
+				stoppedReason = 'days'
+				break
+			}
+
+			if (pages < maxPages) {
+				await sleep(config.backfill.intervalMs)
+			}
+		}
+
+		collected.sort((a, b) => (tsSeconds(a.messageTimestamp) ?? 0) - (tsSeconds(b.messageTimestamp) ?? 0))
+		const moved = anchor.id !== first.id
+		return {
+			chat: first.remoteJid!,
+			anchor: first,
+			messages: collected.map(m => summarizeMessage(m as unknown as WAMessage)),
+			nextCursor: moved ? anchor : undefined,
+			hasMore: !reachedStart,
+			complete: reachedStart,
+			pages,
+			stoppedReason
+		}
 	}
 
 	stopBackfill(): BackfillStatus {

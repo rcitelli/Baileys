@@ -733,8 +733,10 @@
 					const l = L[i]
 					if (l.startsWith('```')) { const b=[]; i++; while(i<L.length && !L[i].startsWith('```')){b.push(L[i]);i++} i++; out.push('<pre><code>'+H(b.join('\n'))+'</code></pre>'); continue }
 					if (/^\s*\|(.+)\|\s*$/.test(l) && i+1<L.length && /^\s*\|[\s:|-]+\|\s*$/.test(L[i+1])) {
-						const head = l.trim().slice(1,-1).split('|').map(x=>x.trim()); i+=2; const rows=[]
-						while(i<L.length && /^\s*\|(.+)\|\s*$/.test(L[i])){ rows.push(L[i].trim().slice(1,-1).split('|').map(x=>x.trim())); i++ }
+						// split on unescaped pipes only; "\|" is a literal pipe inside a cell (GFM)
+						const cells = r => r.trim().slice(1,-1).split(/(?<!\\)\|/).map(x=>x.trim().replace(/\\\|/g,'|'))
+						const head = cells(l); i+=2; const rows=[]
+						while(i<L.length && /^\s*\|(.+)\|\s*$/.test(L[i])){ rows.push(cells(L[i])); i++ }
 						out.push('<table><thead><tr>'+head.map(h=>'<th>'+inline(h)+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>'<td>'+inline(c)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'); continue
 					}
 					if (/^#{1,3}\s/.test(l)) { const lv=l.match(/^#+/)[0].length; out.push(`<h${lv}>`+inline(l.replace(/^#+\s/,''))+`</h${lv}>`); i++; continue }

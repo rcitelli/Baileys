@@ -110,7 +110,12 @@ export const config = {
 		/** Persist message METADATA (no content) for the panel's activity view */
 		enabled: bool(process.env.HISTORY_ENABLED, true),
 		/** Days to keep metadata before automatic cleanup */
-		retentionDays: num(process.env.HISTORY_RETENTION_DAYS, 30)
+		retentionDays: num(process.env.HISTORY_RETENTION_DAYS, 30),
+		/**
+		 * Wall-clock budget for one synchronous history read (POST /chats/:jid/history).
+		 * Kept under Cloudflare's 100s proxy timeout; the caller continues with nextCursor.
+		 */
+		readBudgetMs: Math.max(10_000, num(process.env.HISTORY_READ_BUDGET_MS, 75_000))
 	}
 } as const
 

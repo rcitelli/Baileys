@@ -1,7 +1,7 @@
 import { ALL_WEBHOOK_EVENTS } from './types.js'
 
 /** Bump when the API surface documented here changes. */
-export const DOCS_VERSION = '1.1.0'
+export const DOCS_VERSION = '1.2.0'
 
 /** Build the full API reference as Markdown, stamped with the docs + library versions. */
 export const buildApiDocs = (libraryVersion: string): string => {
@@ -93,12 +93,12 @@ Para uma empresa, \`id\` é o seu identificador local. Para o operador, \`id\` �
 **Exemplos**
 \`\`\`bash
 # texto
-curl -X POST https://wpp.elosolar.com.br/api/sessions/vendas/send-text \\
+curl -X POST https://api.wpp.elosolar.com.br/api/sessions/vendas/send-text \\
   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \\
   -d '{"to":"5511999999999","text":"Olá!"}'
 
 # imagem por URL
-curl -X POST https://wpp.elosolar.com.br/api/sessions/vendas/send \\
+curl -X POST https://api.wpp.elosolar.com.br/api/sessions/vendas/send \\
   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \\
   -d '{"to":"5511999999999","message":{"image":{"url":"https://.../f.jpg"},"caption":"oi"}}'
 \`\`\`
@@ -116,13 +116,63 @@ curl -X POST https://wpp.elosolar.com.br/api/sessions/vendas/send \\
 | POST | \`/api/sessions/:id/history/backfill\` | **Backfill sem re-parear**: para cada conversa com alguma mensagem conhecida, busca as mais antigas de 50 em 50 até \`days\` (padrão \`BACKFILL_DAYS\`=90). Body: \`{ days?, anchors?, maxPagesPerChat?, intervalMs? }\` — \`anchors\` (\`[{ remoteJid, id, fromMe, timestamp }]\`) acrescenta conversas que o servidor não conhece. Roda em segundo plano; os lotes chegam com \`origin: "backfill"\`. |
 | DELETE | \`/api/sessions/:id/history/backfill\` | Interrompe o backfill em andamento. |
 | GET | \`/api/sessions/:id/history/sync\` | Estado: \`{ platform, full, backfill }\` — resposta do celular ao pedido completo e progresso do backfill (conversas, pedidos, mensagens, timeouts). |
-| POST | \`/api/sessions/:id/history/fetch\` | Pede ao celular mensagens **mais antigas** de uma conversa (até 50 por pedido). Body: \`{ jid \| to, count?, anchor? }\`. Responde \`202\`; as mensagens chegam **depois**, pelo webhook \`messaging-history.set\` (\`syncType\` 6). \`anchor\` = \`{ id, fromMe, timestamp }\` de uma mensagem que você já tem; sem ele, o servidor usa a mais antiga que conhece da conversa. |
+| POST | \`/api/sessions/:id/chats/:jid/history\` | **Lê o histórico de uma conversa e devolve na resposta** (não só pelo webhook). Pagina para trás a partir da mensagem mais antiga conhecida; com \`full: true\`, segue até o início da conversa. Detalhes abaixo. |
+| POST | \`/api/sessions/:id/history/fetch\` | Pede ao celular mensagens **mais antigas** de uma conversa (até 50 por pedido). Body: \`{ jid \\| to, count?, anchor? }\`. Responde \`202\`; as mensagens chegam **depois**, pelo webhook \`messaging-history.set\` (\`syncType\` 6). \`anchor\` = \`{ id, fromMe, timestamp }\` de uma mensagem que você já tem; sem ele, o servidor usa a mais antiga que conhece da conversa. |
 
 Registro de histórico:
 \`\`\`json
 { "t": 1788048000000, "dir": "in", "chat": "5511...@s.whatsapp.net", "type": "conversation", "id": "ABCD", "status": "2" }
 \`\`\`
 > O conteúdo das mensagens **não** é armazenado no servidor. Ele chega às suas aplicações por webhook, e cada uma decide se guarda.
+
+### Ler o histórico de uma conversa (resposta direta)
+
+\`POST /api/sessions/:id/chats/:jid/history\` pede ao celular as mensagens **anteriores** a uma mensagem de referência (âncora) e **devolve o conteúdo na própria resposta**. Serve para abrir uma conversa antiga, inclusive de antes de o dispositivo ser vinculado.
+
+\`:jid\` aceita o número (\`5511999999999\`) ou o JID completo. Body (tudo opcional):
+
+| Campo | Descrição |
+|---|---|
+| \`count\` | Mensagens por página, 1 a 50 (padrão 50). |
+| \`anchor\` | \`{ id, fromMe, timestamp }\` (timestamp em **segundos**) da mensagem mais antiga que você já tem. Sem ele, o servidor usa a mais antiga que conhece da conversa. |
+| \`full\` | \`true\` para continuar paginando até o início da conversa. |
+| \`maxPages\` | Limite de páginas no modo \`full\` (padrão 20, máx. 200). |
+| \`days\` | Para quando as mensagens ficarem mais antigas que isso (dias). |
+
+**Resposta**
+\`\`\`json
+{
+  "chat": "123456789@lid",
+  "anchor": { "id": "3EB0...", "fromMe": false, "timestamp": 1700000500, "remoteJid": "123456789@lid" },
+  "messages": [
+    {
+      "id": "3EB0A1...", "chat": "123456789@lid", "fromMe": false, "timestamp": 1700000071,
+      "pushName": "Cliente", "type": "conversation", "text": "Olá, tudo bem?",
+      "key": { "...": "..." }, "message": { "...mensagem completa..." }
+    }
+  ],
+  "nextCursor": { "id": "3EB0A1...", "fromMe": false, "timestamp": 1700000071, "remoteJid": "123456789@lid" },
+  "hasMore": true,
+  "complete": false,
+  "pages": 1,
+  "stoppedReason": "single-page"
+}
+\`\`\`
+- \`messages\` vem em ordem **cronológica**. Para ir mais para trás, envie \`nextCursor\` como \`anchor\` na próxima chamada.
+- \`complete: true\` = chegou ao início da conversa.
+- \`stoppedReason\`: \`single-page\`, \`start-of-chat\`, \`page-limit\`, \`days\`, \`time-budget\` (limite de tempo da chamada, \`HISTORY_READ_BUDGET_MS\`, padrão 75s — abaixo do limite de 100s do Cloudflare) ou \`timeout\` (o celular parou de responder no meio; o que já chegou é devolvido).
+- As mesmas mensagens também são encaminhadas ao webhook \`messaging-history.set\` com \`origin: "card"\`.
+
+**Exemplo — conversa inteira**
+\`\`\`bash
+curl -X POST https://api.wpp.elosolar.com.br/api/sessions/vendas/chats/5511999999999/history \\
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"full":true}'
+# se hasMore=true, repita com: -d '{"full":true,"anchor":<nextCursor>}'
+\`\`\`
+
+**Erros:** \`422\` sem mensagem de referência (envie \`anchor\`, ou aguarde uma mensagem da conversa) · \`409\` sessão desconectada · \`504\` o celular não respondeu (precisa estar online) · \`400\` parâmetro inválido.
+
+**Limites:** o histórico vem do **celular** (precisa estar online). Só volta o que ainda existe nele. Mídias antigas podem ter expirado nos servidores do WhatsApp. Leituras são processadas uma por vez por sessão. O conteúdo é repassado e **não** fica armazenado no servidor.
 
 ---
 
