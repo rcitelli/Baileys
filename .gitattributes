@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# TypeScript is always text, even if a stray control byte sneaks in (upstream #2751).
+*.ts diff
