@@ -3,10 +3,59 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config } from './config.js'
 import { logger } from './logger.js'
+import { DEFAULT_CONNECTION_CONFIG, fetchLatestBaileysVersion, fetchLatestWaWebVersion, type WAVersion } from './wa.js'
 
 const UPSTREAM_REPO = 'WhiskeySockets/Baileys'
 const UPSTREAM_BRANCH = 'master'
 const CACHE_TTL_MS = 60 * 60 * 1000 // 1h — GitHub unauth limit is 60 req/h/IP
+
+export interface WaVersionInfo {
+	version: WAVersion
+	/** where it came from: pinned by env, live WhatsApp Web, upstream master, or bundled */
+	source: 'env' | 'web.whatsapp.com' | 'baileys-master' | 'bundled'
+	resolvedAt: string
+}
+
+const WA_VERSION_TTL_MS = 60 * 60 * 1000
+let waVersion: WaVersionInfo | undefined
+
+/**
+ * WhatsApp Web version the sockets advertise. WhatsApp eventually refuses clients
+ * that are too old, and the upstream master's constant can lag for weeks, so prefer
+ * the live version from web.whatsapp.com, then master, then the bundled default.
+ * `WA_VERSION=2.3000.x` pins it (incident escape hatch). Cached for an hour.
+ */
+export const resolveWaVersion = async (force = false): Promise<WaVersionInfo> => {
+	if (!force && waVersion && Date.now() - Date.parse(waVersion.resolvedAt) < WA_VERSION_TTL_MS) {
+		return waVersion
+	}
+
+	const now = new Date().toISOString()
+	const pinned = process.env.WA_VERSION?.split('.').map(Number)
+	if (pinned?.length === 3 && pinned.every(n => Number.isInteger(n) && n >= 0)) {
+		waVersion = { version: pinned as WAVersion, source: 'env', resolvedAt: now }
+		return waVersion
+	}
+
+	const live = await fetchLatestWaWebVersion({ signal: AbortSignal.timeout(8000) }).catch(() => undefined)
+	if (live?.isLatest) {
+		waVersion = { version: live.version, source: 'web.whatsapp.com', resolvedAt: now }
+		return waVersion
+	}
+
+	const master = await fetchLatestBaileysVersion({ signal: AbortSignal.timeout(8000) }).catch(() => undefined)
+	if (master?.isLatest) {
+		waVersion = { version: master.version, source: 'baileys-master', resolvedAt: now }
+		logger.warn('could not read the live WhatsApp Web version; using upstream master')
+		return waVersion
+	}
+
+	logger.warn('could not resolve a WhatsApp Web version online; using the bundled default')
+	waVersion = { version: DEFAULT_CONNECTION_CONFIG.version, source: 'bundled', resolvedAt: now }
+	return waVersion
+}
+
+export const getWaVersionInfo = (): WaVersionInfo | undefined => waVersion
 
 export interface UpdateInfo {
 	/** Version of the Baileys library this server was built against */
@@ -20,6 +69,8 @@ export interface UpdateInfo {
 	branch: string
 	checkedAt: string
 	error?: string
+	/** WhatsApp Web version the sessions advertise, and its source */
+	waWeb?: { version: string; source: WaVersionInfo['source'] }
 }
 
 let cachedVersion: string | undefined
@@ -155,6 +206,11 @@ export const checkUpdates = async (force = false): Promise<UpdateInfo> => {
 	} catch (error) {
 		info.error = (error as Error).message
 		logger.warn({ err: info.error }, 'update check failed')
+	}
+
+	const wa = await resolveWaVersion(force).catch(() => undefined)
+	if (wa) {
+		info.waWeb = { version: wa.version.join('.'), source: wa.source }
 	}
 
 	cache = { at: Date.now(), data: info }

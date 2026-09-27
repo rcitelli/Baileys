@@ -1,7 +1,7 @@
 import { ALL_WEBHOOK_EVENTS } from './types.js'
 
 /** Bump when the API surface documented here changes. */
-export const DOCS_VERSION = '1.2.0'
+export const DOCS_VERSION = '1.3.0'
 
 /** Build the full API reference as Markdown, stamped with the docs + library versions. */
 export const buildApiDocs = (libraryVersion: string): string => {
@@ -182,7 +182,7 @@ curl -X POST https://api.wpp.elosolar.com.br/api/sessions/vendas/chats/551199999
 |---|---|---|
 | GET | \`/api/system/info\` | Usuário logado, versão, status. |
 | GET | \`/api/system/health\` | Uptime, memória, armazenamento/disco, sessões. |
-| GET | \`/api/system/updates\` | Verifica atualizações do Baileys no GitHub (\`?refresh=1\` força). |
+| GET | \`/api/system/updates\` | Verifica atualizações do Baileys no GitHub (\`?refresh=1\` força). Inclui \`waWeb: { version, source }\` — a versão do WhatsApp Web que as sessões anunciam e de onde veio (\`web.whatsapp.com\` ao vivo, \`baileys-master\`, \`bundled\` ou \`env\` via \`WA_VERSION\`). |
 | GET | \`/api/system/apps\` | Lista apps gerenciados + chaves legadas (mascaradas). |
 | POST | \`/api/system/apps\` | Cria app. Body \`{ name }\` → \`{ app, key }\` (chave exibida uma vez). *Requer usuário do painel.* |
 | PATCH | \`/api/system/apps/:id\` | \`{ name?, enabled? }\`. *Requer usuário do painel.* |

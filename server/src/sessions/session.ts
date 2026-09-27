@@ -7,7 +7,6 @@ import makeWASocket, {
 	Browsers,
 	type ConnectionState,
 	DisconnectReason,
-	fetchLatestBaileysVersion,
 	getContentType,
 	isLidUser,
 	isPnUser,
@@ -31,6 +30,7 @@ import {
 	queryHistory
 } from '../history.js'
 import { logger } from '../logger.js'
+import { resolveWaVersion } from '../system.js'
 import type { SessionInfo, SessionMeta, SessionStatus, WebhookEvent } from '../types.js'
 import { dispatchWebhook } from '../webhooks/dispatcher.js'
 import { summarizeMessage } from './serialize.js'
@@ -282,7 +282,7 @@ export class Session extends EventEmitter {
 			const { state, saveCreds } = await useMultiFileAuthState(this.paths.authDir)
 			this.saveCreds = saveCreds
 
-			const { version } = await fetchLatestBaileysVersion()
+			const { version } = await resolveWaVersion()
 
 			this.setStatus('connecting')
 
