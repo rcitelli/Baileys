@@ -5,6 +5,7 @@ import { appStore } from '../apps.js'
 import { buildApiDocs, DOCS_VERSION } from '../docs.js'
 import type { SessionManager } from '../sessions/manager.js'
 import type { HistoryAnchor } from '../sessions/session.js'
+import { listRecipes, parseSpec } from '../interactive.js'
 import { checkUpdates, getCurrentVersion, getHealth, listApiClients } from '../system.js'
 import type { WebhookEvent } from '../types.js'
 import { cloudflareConfigured } from './auth.js'
@@ -359,6 +360,36 @@ export const createApiRouter = (manager: SessionManager): Router => {
 		})
 	)
 
+	/** Reply buttons / list / call-to-action buttons (unofficial: see interactive.ts). */
+	router.post(
+		'/sessions/:id/send-interactive',
+		sensitiveLimiter,
+		asyncHandler(async (req, res) => {
+			const { to, interactive, recipe } = req.body ?? {}
+			if (!to || !interactive) {
+				throw new Boom('`to` and `interactive` are required', { statusCode: 400 })
+			}
+
+			const spec = parseSpec(interactive)
+			const result = await getScoped(req, req.params.id!).sendInteractive(toJid(to), spec, recipe)
+			res.json({ key: result.key, recipe: result.recipe })
+		})
+	)
+
+	router.get(
+		'/interactive/recipes',
+		asyncHandler(async (_req, res) => {
+			res.json({ recipes: listRecipes() })
+		})
+	)
+
+	router.get(
+		'/sessions/:id/interactive/log',
+		asyncHandler(async (req, res) => {
+			res.json({ log: getScoped(req, req.params.id!).getInteractiveLog() })
+		})
+	)
+
 	router.post(
 		'/sessions/:id/check',
 		asyncHandler(async (req, res) => {
@@ -400,6 +431,66 @@ export const createApiRouter = (manager: SessionManager): Router => {
 			}
 
 			await getScoped(req, req.params.id!).readMessages(keys)
+			res.json({ ok: true })
+		})
+	)
+
+	// ---- Groups --------------------------------------------------------------
+
+	/** Normalized group view: participants carry phone (when WhatsApp tells it) and LID. */
+	const groupView = (g: {
+		id: string
+		subject?: string
+		owner?: string
+		creation?: number
+		announce?: boolean
+		participants?: { id: string; phoneNumber?: string; lid?: string; admin?: string | null }[]
+	}) => ({
+		id: g.id,
+		subject: g.subject ?? '',
+		owner: g.owner ?? null,
+		creation: g.creation ?? null,
+		announce: !!g.announce,
+		size: g.participants?.length ?? 0,
+		participants: (g.participants ?? []).map(p => ({
+			id: p.id,
+			phoneNumber: p.phoneNumber ?? (p.id.endsWith('@s.whatsapp.net') ? p.id : null),
+			lid: p.lid ?? (p.id.endsWith('@lid') ? p.id : null),
+			admin: p.admin ?? null
+		}))
+	})
+
+	const requireGroupJid = (raw: string | undefined): string => {
+		const jid = String(raw ?? '').trim()
+		if (!isJidGroup(jid)) {
+			throw new Boom('A group jid (…@g.us) is required', { statusCode: 400 })
+		}
+
+		return jid
+	}
+
+	router.get(
+		'/sessions/:id/groups',
+		asyncHandler(async (req, res) => {
+			const groups = await getScoped(req, req.params.id!).listGroups()
+			res.json({ groups: Object.values(groups ?? {}).map(groupView) })
+		})
+	)
+
+	router.get(
+		'/sessions/:id/groups/:jid',
+		asyncHandler(async (req, res) => {
+			const jid = requireGroupJid(req.params.jid)
+			res.json(groupView(await getScoped(req, req.params.id!).groupMetadata(jid)))
+		})
+	)
+
+	router.post(
+		'/sessions/:id/groups/:jid/leave',
+		sensitiveLimiter,
+		asyncHandler(async (req, res) => {
+			const jid = requireGroupJid(req.params.jid)
+			await getScoped(req, req.params.id!).leaveGroup(jid)
 			res.json({ ok: true })
 		})
 	)

@@ -25,6 +25,7 @@ export type WebhookEvent =
 	| 'contacts.update'
 	| 'groups.upsert'
 	| 'groups.update'
+	| 'group-participants.update'
 	| 'call'
 
 export const ALL_WEBHOOK_EVENTS: WebhookEvent[] = [
@@ -42,6 +43,7 @@ export const ALL_WEBHOOK_EVENTS: WebhookEvent[] = [
 	'contacts.update',
 	'groups.upsert',
 	'groups.update',
+	'group-participants.update',
 	'call'
 ]
 

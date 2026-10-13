@@ -7,7 +7,10 @@ import makeWASocket, {
 	Browsers,
 	type ConnectionState,
 	DisconnectReason,
+	generateMessageIDV2,
+	generateWAMessageFromContent,
 	getContentType,
+	isJidGroup,
 	isLidUser,
 	isPnUser,
 	jidNormalizedUser,
@@ -29,6 +32,13 @@ import {
 	oldestPerChat,
 	queryHistory
 } from '../history.js'
+import {
+	buildInteractive,
+	extractInteractiveReply,
+	type InteractiveReply,
+	type InteractiveSpec,
+	resolveRecipe
+} from '../interactive.js'
 import { logger } from '../logger.js'
 import { resolveWaVersion } from '../system.js'
 import type { SessionInfo, SessionMeta, SessionStatus, WebhookEvent } from '../types.js'
@@ -49,7 +59,7 @@ interface ChatLite {
 
 /** Minimal shape of a WAMessage as it arrives in upsert/history events. */
 interface RawMessage {
-	key?: { id?: string; remoteJid?: string; fromMe?: boolean }
+	key?: { id?: string; remoteJid?: string; fromMe?: boolean; participant?: string }
 	message?: Record<string, unknown>
 	messageTimestamp?: number | string | { toNumber?: () => number; low?: number }
 	status?: number
@@ -65,6 +75,32 @@ interface HistorySetData {
 	isLatest?: boolean
 	chunkOrder?: number | null
 	peerDataRequestSessionId?: string | null
+}
+
+/** Baileys' WebMessageInfo.Status, by number. */
+const STATUS_NAMES: Record<number, string> = { 0: 'error', 1: 'pending', 2: 'server', 3: 'delivered', 4: 'read', 5: 'read' }
+const STATUS_RANK: Record<string, number> = { sending: 0, sent: 1, pending: 1, server: 2, delivered: 3, read: 4, error: 5 }
+
+/** How many interactive sends/clicks each session keeps for the test panel. */
+const INTERACTIVE_LOG_SIZE = 100
+
+/** One line of the interactive test log: a send (and its receipts) or a click. */
+export interface InteractiveLogEntry {
+	at: string
+	dir: 'out' | 'in'
+	chat: string
+	/** WhatsApp message id */
+	id?: string
+	kind?: string
+	recipe?: string
+	/** out: sent → server → delivered → read, or error */
+	status?: string
+	statusAt?: string
+	error?: string
+	/** in: the normalised click */
+	reply?: InteractiveReply
+	/** in: who clicked (participant in groups) */
+	from?: string
 }
 
 /** Anchor for an on-demand history fetch: a message the linked device already has. */
@@ -202,6 +238,8 @@ export class Session extends EventEmitter {
 	// Live, in-memory only (not persisted) — cleared on restart. Matches "live, on-demand".
 	private readonly contacts = new Map<string, ContactLite>()
 	private readonly chats = new Map<string, ChatLite>()
+	/** Recent interactive sends and clicks (newest last), for the test panel. */
+	private readonly interactiveLog: InteractiveLogEntry[] = []
 
 	// History deliveries are chained so batches reach the receiver in order and one
 	// multi-thousand-message sync never floods it with parallel POSTs.
@@ -351,6 +389,7 @@ export class Session extends EventEmitter {
 			const upserts = events['messages.upsert'] as { messages?: RawMessage[] } | undefined
 			if (upserts?.messages) {
 				for (const m of upserts.messages) {
+					this.captureInteractiveReply(m)
 					this.captureFullSyncResponse(m)
 					const entry = this.toHistoryEntry(m)
 					if (entry) {
@@ -358,6 +397,8 @@ export class Session extends EventEmitter {
 					}
 				}
 			}
+
+			this.captureInteractiveStatus(events)
 
 			const contacts = [
 				...((events['contacts.upsert'] as unknown[]) ?? []),
@@ -415,6 +456,133 @@ export class Session extends EventEmitter {
 		} catch (error) {
 			logger.warn({ session: this.id, err: (error as Error).message }, 'event capture failed')
 		}
+	}
+
+	/**
+	 * A click on one of our buttons/lists: normalised into `interactiveReply` ON the
+	 * message itself, so the webhook receiver reads one shape instead of four.
+	 */
+	private captureInteractiveReply(m: RawMessage) {
+		const key = m.key
+		if (!key || key.fromMe || !m.message) {
+			return
+		}
+
+		const reply = extractInteractiveReply(m)
+		if (!reply) {
+			return
+		}
+
+		;(m as RawMessage & { interactiveReply?: InteractiveReply }).interactiveReply = reply
+		this.logInteractive({
+			at: new Date().toISOString(),
+			dir: 'in',
+			chat: key.remoteJid ?? '',
+			id: key.id,
+			reply,
+			from: key.participant ?? key.remoteJid
+		})
+	}
+
+	/** Receipts of OUR interactive sends (1:1 status updates and group receipts). */
+	private captureInteractiveStatus(events: Record<string, unknown>) {
+		const updates = (events['messages.update'] as Array<{
+			key?: { id?: string }
+			update?: { status?: number; messageStubParameters?: unknown[] }
+		}>) ?? []
+		for (const u of updates) {
+			const status = u.update?.status
+			if (u.key?.id && typeof status === 'number') {
+				this.markInteractive(u.key.id, STATUS_NAMES[status] ?? String(status), u.update?.messageStubParameters)
+			}
+		}
+
+		const receipts = (events['message-receipt.update'] as Array<{
+			key?: { id?: string }
+			receipt?: { readTimestamp?: unknown; receiptTimestamp?: unknown }
+		}>) ?? []
+		for (const r of receipts) {
+			if (r.key?.id) {
+				this.markInteractive(r.key.id, r.receipt?.readTimestamp ? 'read' : 'delivered')
+			}
+		}
+	}
+
+	private markInteractive(id: string, status: string, stub?: unknown[]) {
+		const entry = this.interactiveLog.find(e => e.dir === 'out' && e.id === id)
+		if (!entry) {
+			return
+		}
+
+		// receipts arrive out of order: never step back (read → delivered)
+		if ((STATUS_RANK[status] ?? 0) < (STATUS_RANK[entry.status ?? ''] ?? 0)) {
+			return
+		}
+
+		entry.status = status
+		entry.statusAt = new Date().toISOString()
+		if (status === 'error') {
+			entry.error = stub?.length ? stub.map(String).join(' ') : 'error'
+		}
+	}
+
+	private logInteractive(entry: InteractiveLogEntry) {
+		this.interactiveLog.push(entry)
+		if (this.interactiveLog.length > INTERACTIVE_LOG_SIZE) {
+			this.interactiveLog.splice(0, this.interactiveLog.length - INTERACTIVE_LOG_SIZE)
+		}
+	}
+
+	getInteractiveLog(): InteractiveLogEntry[] {
+		return [...this.interactiveLog].reverse()
+	}
+
+	/**
+	 * Send reply buttons, a list or call-to-action buttons (see `interactive.ts`).
+	 * Goes straight to `relayMessage` with the recipe's `biz` node: `sendMessage`
+	 * has no content type for these. The caller learns about delivery from the
+	 * receipts (`messages.update` / `message-receipt.update`) — a send that returns
+	 * here can still be dropped silently by WhatsApp.
+	 */
+	async sendInteractive(jid: string, spec: InteractiveSpec, recipeName?: unknown) {
+		const sock = this.requireSock()
+		const { name, recipe } = resolveRecipe(spec, recipeName)
+		const { message, additionalNodes } = buildInteractive(spec, recipe, !!isJidGroup(jid))
+		const full = generateWAMessageFromContent(jid, message, {
+			userJid: sock.user!.id,
+			messageId: generateMessageIDV2(sock.user?.id)
+		})
+		const entry: InteractiveLogEntry = {
+			at: new Date().toISOString(),
+			dir: 'out',
+			chat: jid,
+			id: full.key.id ?? undefined,
+			kind: spec.kind,
+			recipe: name,
+			status: 'sending'
+		}
+		this.logInteractive(entry)
+		try {
+			await sock.relayMessage(jid, full.message!, { messageId: full.key.id!, additionalNodes })
+		} catch (error) {
+			entry.status = 'error'
+			entry.error = (error as Error).message
+			throw error
+		}
+
+		if (entry.status === 'sending') {
+			entry.status = 'sent'
+		}
+
+		// Same as `sendMessage` with `emitOwnEvents`: our own message also comes out
+		// as a `messages.upsert` (webhooks and the activity history see it).
+		process.nextTick(() => {
+			sock.upsertMessage(full, 'append').catch(err =>
+				logger.warn({ session: this.id, err: (err as Error).message }, 'own interactive upsert failed')
+			)
+		})
+
+		return { key: full.key, recipe: name }
 	}
 
 	/** Metadata record for one message (no content); also bumps the live chat map. */
@@ -1213,6 +1381,21 @@ export class Session extends EventEmitter {
 
 	async readMessages(keys: WAMessageKey[]) {
 		return this.requireSock().readMessages(keys)
+	}
+
+	/** Groups this session participates in (metadata incl. participants), keyed by jid. */
+	async listGroups() {
+		return this.requireSock().groupFetchAllParticipating()
+	}
+
+	/** One group's metadata (subject + participants with phoneNumber/lid when known). */
+	async groupMetadata(jid: string) {
+		return this.requireSock().groupMetadata(jid)
+	}
+
+	/** Leave a group (the session stops receiving and sending there). */
+	async leaveGroup(jid: string) {
+		return this.requireSock().groupLeave(jid)
 	}
 
 	/** Gracefully stop the socket without deleting credentials (survives restart). */
