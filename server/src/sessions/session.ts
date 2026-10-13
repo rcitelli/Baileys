@@ -38,32 +38,42 @@ type WaVersion = Awaited<ReturnType<typeof fetchLatestBaileysVersion>>['version'
 
 /** How long a resolved WhatsApp Web version is reused before asking again. */
 const WA_VERSION_TTL_MS = 6 * 60 * 60 * 1000
+/** web.whatsapp.com that does not answer in this time falls back right away. */
+const WA_VERSION_TIMEOUT_MS = 8_000
 let cachedWaVersion: { version: WaVersion; at: number } | undefined
+/** Sessions starting together (manager.init) share ONE lookup in flight. */
+let inflightWaVersion: Promise<WaVersion> | undefined
 
 /**
  * The WhatsApp Web version to advertise. The library's `fetchLatestBaileysVersion`
  * reads the number from upstream `master`, which lags (it only moves when upstream
  * merges its automated "update WhatsApp Web version" PR); an old version is the
  * usual cause of connection/pairing refusals. So: the LIVE version from
- * web.whatsapp.com first, then upstream master, then the bundled one. Cached for a
- * few hours — every session start would otherwise hit web.whatsapp.com.
+ * web.whatsapp.com first (bounded by a timeout), then upstream master, then the
+ * bundled one. Cached for a few hours and shared while in flight — every session
+ * start would otherwise hit web.whatsapp.com.
  */
-const resolveWaVersion = async (): Promise<WaVersion> => {
+const resolveWaVersion = (): Promise<WaVersion> => {
 	if (cachedWaVersion && Date.now() - cachedWaVersion.at < WA_VERSION_TTL_MS) {
-		return cachedWaVersion.version
+		return Promise.resolve(cachedWaVersion.version)
 	}
 
-	const live = await fetchLatestWaWebVersion()
-	const chosen = live.isLatest ? live : await fetchLatestBaileysVersion()
-	logger.info(
-		{ version: chosen.version.join('.'), source: live.isLatest ? 'web.whatsapp.com' : chosen.isLatest ? 'baileys-master' : 'bundled' },
-		'WhatsApp Web version resolved'
-	)
-	if (chosen.isLatest) {
-		cachedWaVersion = { version: chosen.version, at: Date.now() }
-	}
+	inflightWaVersion ??= (async () => {
+		const live = await fetchLatestWaWebVersion({ signal: AbortSignal.timeout(WA_VERSION_TIMEOUT_MS) })
+		const chosen = live.isLatest ? live : await fetchLatestBaileysVersion()
+		logger.info(
+			{ version: chosen.version.join('.'), source: live.isLatest ? 'web.whatsapp.com' : chosen.isLatest ? 'baileys-master' : 'bundled' },
+			'WhatsApp Web version resolved'
+		)
+		if (chosen.isLatest) {
+			cachedWaVersion = { version: chosen.version, at: Date.now() }
+		}
 
-	return chosen.version
+		return chosen.version
+	})().finally(() => {
+		inflightWaVersion = undefined
+	})
+	return inflightWaVersion
 }
 
 interface ContactLite {
