@@ -8,6 +8,7 @@ import makeWASocket, {
 	type ConnectionState,
 	DisconnectReason,
 	fetchLatestBaileysVersion,
+	fetchLatestWaWebVersion,
 	getContentType,
 	isLidUser,
 	isPnUser,
@@ -32,6 +33,38 @@ import {
 import { logger } from '../logger.js'
 import type { SessionInfo, SessionMeta, SessionStatus, WebhookEvent } from '../types.js'
 import { dispatchWebhook } from '../webhooks/dispatcher.js'
+
+type WaVersion = Awaited<ReturnType<typeof fetchLatestBaileysVersion>>['version']
+
+/** How long a resolved WhatsApp Web version is reused before asking again. */
+const WA_VERSION_TTL_MS = 6 * 60 * 60 * 1000
+let cachedWaVersion: { version: WaVersion; at: number } | undefined
+
+/**
+ * The WhatsApp Web version to advertise. The library's `fetchLatestBaileysVersion`
+ * reads the number from upstream `master`, which lags (it only moves when upstream
+ * merges its automated "update WhatsApp Web version" PR); an old version is the
+ * usual cause of connection/pairing refusals. So: the LIVE version from
+ * web.whatsapp.com first, then upstream master, then the bundled one. Cached for a
+ * few hours — every session start would otherwise hit web.whatsapp.com.
+ */
+const resolveWaVersion = async (): Promise<WaVersion> => {
+	if (cachedWaVersion && Date.now() - cachedWaVersion.at < WA_VERSION_TTL_MS) {
+		return cachedWaVersion.version
+	}
+
+	const live = await fetchLatestWaWebVersion()
+	const chosen = live.isLatest ? live : await fetchLatestBaileysVersion()
+	logger.info(
+		{ version: chosen.version.join('.'), source: live.isLatest ? 'web.whatsapp.com' : chosen.isLatest ? 'baileys-master' : 'bundled' },
+		'WhatsApp Web version resolved'
+	)
+	if (chosen.isLatest) {
+		cachedWaVersion = { version: chosen.version, at: Date.now() }
+	}
+
+	return chosen.version
+}
 
 interface ContactLite {
 	id: string
@@ -251,7 +284,7 @@ export class Session extends EventEmitter {
 			const { state, saveCreds } = await useMultiFileAuthState(this.paths.authDir)
 			this.saveCreds = saveCreds
 
-			const { version } = await fetchLatestBaileysVersion()
+			const version = await resolveWaVersion()
 
 			this.setStatus('connecting')
 
