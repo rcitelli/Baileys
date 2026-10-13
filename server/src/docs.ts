@@ -90,6 +90,16 @@ Para uma empresa, \`id\` é o seu identificador local. Para o operador, \`id\` �
 
 \`to\` aceita número puro (\`5511999999999\` → \`...@s.whatsapp.net\`) ou um JID completo (grupos: \`...@g.us\`).
 
+## Grupos
+
+| Método | Rota | Body | Descrição |
+|---|---|---|---|
+| GET | \`/api/sessions/:id/groups\` | — | Grupos em que a sessão está: \`{ groups: [{ id, subject, size, participants: [{ id, phoneNumber, lid, admin }] }] }\`. |
+| GET | \`/api/sessions/:id/groups/:jid\` | — | Um grupo (mesmo formato). \`jid\` termina em \`@g.us\`. |
+| POST | \`/api/sessions/:id/groups/:jid/leave\` | — | Sai do grupo. |
+
+Eventos de webhook úteis: \`groups.upsert\` (a sessão entrou num grupo), \`group-participants.update\` (alguém entrou/saiu) e \`message-receipt.update\` (quem leu cada mensagem — em grupo, por participante).
+
 **Exemplos**
 \`\`\`bash
 # texto
