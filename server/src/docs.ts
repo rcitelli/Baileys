@@ -90,6 +90,23 @@ Para uma empresa, \`id\` é o seu identificador local. Para o operador, \`id\` �
 
 \`to\` aceita número puro (\`5511999999999\` → \`...@s.whatsapp.net\`) ou um JID completo (grupos: \`...@g.us\`).
 
+## Botões e listas (não oficial)
+
+| Método | Rota | Body | Descrição |
+|---|---|---|---|
+| POST | \`/api/sessions/:id/send-interactive\` | \`{ to, interactive, recipe? }\` | Envia botões de resposta, lista ou botões de ação. Responde \`{ key, recipe }\`. |
+| GET | \`/api/interactive/recipes\` | — | Fórmulas disponíveis (\`name\`, \`kind\`, \`default\`). |
+| GET | \`/api/sessions/:id/interactive/log\` | — | Últimos envios (com recibo) e cliques — é o que o painel de teste mostra. |
+
+\`interactive\`:
+- \`{ kind: "buttons", text, footer?, buttons: [{ id, text }] }\` — até 3 botões de resposta (rótulo até 20 caracteres).
+- \`{ kind: "list", text, title?, footer?, buttonText, sections: [{ title?, rows: [{ id, title, description? }] }] }\` — até 10 linhas no total. **Só em conversa individual.**
+- \`{ kind: "cta", text, footer?, buttons: [{ type: "url", text, url } | { type: "copy", text, code } | { type: "call", text, phone }] }\` — até 2. Nunca misture com botões de resposta.
+
+O clique chega no \`messages.upsert\` comum, com o campo \`interactiveReply: { type, id, text, quotedId, device }\` já normalizado na mensagem (\`id\` = o id que você pôs no botão/linha; \`quotedId\` = id da mensagem que tinha o botão).
+
+**Não é recurso oficial do WhatsApp.** Pode parar de aparecer com qualquer atualização, e um envio que "dá certo" pode nunca ser entregue: sempre mande o texto alternativo dentro do \`text\` e acompanhe o recibo (\`messages.update\`). Se uma fórmula parar, troque o \`recipe\` (ver \`/api/interactive/recipes\`).
+
 ## Grupos
 
 | Método | Rota | Body | Descrição |

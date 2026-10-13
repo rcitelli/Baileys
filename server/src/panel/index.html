@@ -451,6 +451,7 @@
 				<button data-tab="history" class="active">Atividade</button>
 				<button data-tab="chats">Conversas</button>
 				<button data-tab="contacts">Contatos</button>
+				<button data-tab="buttons">Botões (teste)</button>
 			</div>
 			<div class="dlg-body"><div class="list" id="detail-list"></div></div>
 		</dialog>
@@ -717,11 +718,88 @@
 					} else if (tab === 'chats') {
 						const { chats } = await api(`/sessions/${detailSession.id}/chats`)
 						el.innerHTML = chats.length ? chats.map(c => `<div class="li"><div class="av2">${esc((c.name||jidShort(c.id)||'?')[0]).toUpperCase()}</div><div class="grow"><div class="top">${esc(c.name||jidShort(c.id))}</div><div class="bot">${esc(jidShort(c.id))}</div></div>${c.unread?`<span class="pill open" style="font-size:11px">${c.unread}</span>`:''}</div>`).join('') : emptyList('Nenhuma conversa em memória. Aparecem ao vivo conforme chegam mensagens (não são persistidas).')
+					} else if (tab === 'buttons') {
+						await renderButtonsTab(el)
 					} else {
 						const { contacts } = await api(`/sessions/${detailSession.id}/contacts`)
 						el.innerHTML = contacts.length ? contacts.map(c => `<div class="li"><div class="av2">${esc((c.name||c.notify||jidShort(c.id)||'?')[0]).toUpperCase()}</div><div class="grow"><div class="top">${esc(c.name||c.notify||jidShort(c.id))}</div><div class="bot">${esc(jidShort(c.id))}</div></div></div>`).join('') : emptyList('Nenhum contato em memória ainda (ao vivo, sem persistência).')
 					}
 				} catch (e) { el.innerHTML = emptyList('Erro: '+e.message) }
+			}
+
+			/* ---------- botões (teste das fórmulas não oficiais) ---------- */
+			// O que só um aparelho de verdade responde: a mensagem APARECEU com botões?
+			// O clique volta sozinho (com o aparelho que clicou); a marcação de "apareceu"
+			// é manual e fica só neste navegador.
+			const BTN_SAMPLE = {
+				buttons: 'ok|Ciente\nadiar|Lembrar em 1h\namanha|Amanhã',
+				list: 'amanha|Amanhã|prazo +1 dia\n3d|Em 3 dias\nsemana|Próxima semana',
+				cta: 'url|Abrir site|https://example.com\ncopy|Copiar código|00020126580014BR.GOV.BCB.PIX'
+			}
+			const DEVICES = [['android','Android'],['ios','iPhone'],['web','Web'],['desktop','Desktop']]
+			const marksGet = () => { try { return JSON.parse(localStorage.getItem('hub.btnMarks')||'{}') } catch { return {} } }
+			const marksSet = m => { try { localStorage.setItem('hub.btnMarks', JSON.stringify(m)) } catch {} }
+			let btnTimer = null
+			const STATUS_PT = { sending:'enviando', sent:'enviado', pending:'pendente', server:'no servidor', delivered:'entregue', read:'lido', error:'erro' }
+			const parseLines = (kind, raw) => raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => l.split('|').map(x => x.trim()))
+			const buildSpec = (kind, text, raw) => {
+				const lines = parseLines(kind, raw)
+				if (kind === 'buttons') return { kind, text, buttons: lines.map(([id, t]) => ({ id, text: t || id })) }
+				if (kind === 'list') return { kind, text, buttonText: 'Escolher', sections: [{ rows: lines.map(([id, title, description]) => ({ id, title: title || id, ...(description ? { description } : {}) })) }] }
+				return { kind, text, buttons: lines.map(([type, t, v]) => type === 'url' ? { type, text: t, url: v } : type === 'copy' ? { type, text: t, code: v } : { type, text: t, phone: v }) }
+			}
+			const renderButtonsTab = async (el) => {
+				const { recipes } = await api('/interactive/recipes')
+				el.innerHTML = `
+					<div style="padding:14px 4px;display:flex;flex-direction:column;gap:12px">
+						<div style="font-size:12.5px;color:var(--muted)">Recurso <strong>não oficial</strong> do WhatsApp: teste cada fórmula no seu próprio celular, em cada aparelho, antes de usar. O clique volta sozinho para a lista abaixo (com o aparelho que clicou); marque à mão onde a mensagem apareceu com botões.</div>
+						<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+							<label class="field">Para (número ou JID)<input id="bt-to" placeholder="5511999999999" /></label>
+							<label class="field">Tipo<select id="bt-kind"><option value="buttons">Botões de resposta</option><option value="list">Lista</option><option value="cta">Link / copiar / ligar</option></select></label>
+							<label class="field">Fórmula<select id="bt-recipe"></select></label>
+						</div>
+						<label class="field">Texto<input id="bt-text" value="Teste de botões — toque numa opção (ou responda 1, 2, 3)" /></label>
+						<label class="field"><span id="bt-lines-label">Opções</span><textarea id="bt-lines" rows="3" style="font:inherit;background:var(--surface-2);border:1px solid var(--border-strong);color:var(--text);border-radius:10px;padding:10px 12px"></textarea></label>
+						<div><button class="btn primary sm" id="bt-send">Enviar teste</button></div>
+						<div id="bt-log"></div>
+					</div>`
+				const kindSel = $('#bt-kind'), recSel = $('#bt-recipe'), lines = $('#bt-lines')
+				const LABEL = { buttons: 'Opções — uma por linha: id|texto (até 3)', list: 'Linhas — id|título|descrição (até 10; só conversa individual)', cta: 'Botões — url|texto|https://… · copy|texto|código · call|texto|+55… (até 2)' }
+				const syncKind = () => {
+					const k = kindSel.value
+					recSel.innerHTML = recipes.filter(r => r.kind === k).map(r => `<option value="${esc(r.name)}" ${r.default?'selected':''}>${esc(r.name)}${r.default?' (padrão)':''}</option>`).join('')
+					lines.value = BTN_SAMPLE[k]; $('#bt-lines-label').textContent = LABEL[k]
+				}
+				kindSel.onchange = syncKind; syncKind()
+				$('#bt-send').onclick = async () => {
+					try {
+						const spec = buildSpec(kindSel.value, $('#bt-text').value, lines.value)
+						const r = await api(`/sessions/${detailSession.id}/send-interactive`, { method: 'POST', body: JSON.stringify({ to: $('#bt-to').value, interactive: spec, recipe: recSel.value }) })
+						toast('Enviado ('+r.recipe+')'); refreshBtnLog()
+					} catch (e) { toast('Erro: '+e.message, false) }
+				}
+				refreshBtnLog()
+				clearInterval(btnTimer)
+				btnTimer = setInterval(() => { if ($('#dlg-detail').open && $('#bt-log')) refreshBtnLog(); else clearInterval(btnTimer) }, 3000)
+			}
+			const refreshBtnLog = async () => {
+				const box = $('#bt-log'); if (!box) return
+				try {
+					const { log } = await api(`/sessions/${detailSession.id}/interactive/log`)
+					const marks = marksGet()
+					const clicks = log.filter(e => e.dir === 'in')
+					box.innerHTML = log.filter(e => e.dir === 'out').map(e => {
+						const got = clicks.filter(c => c.reply?.quotedId === e.id)
+						const m = marks[e.id] || {}
+						return `<div class="li" style="align-items:flex-start"><div class="grow">
+							<div class="top">${esc(e.recipe||e.kind)} → ${esc(jidShort(e.chat))}</div>
+							<div class="bot">${esc(STATUS_PT[e.status]||e.status||'')}${e.error?' · '+esc(e.error):''} · ${esc(ago(e.at))}</div>
+							<div class="bot">Apareceu com botões: ${DEVICES.map(([k,l]) => `<label style="margin-right:10px"><input type="checkbox" data-mark="${esc(e.id)}" data-dev="${k}" ${m[k]?'checked':''}/> ${l}</label>`).join('')}</div>
+							<div class="bot">${got.length ? got.map(c => `clique <strong>${esc(c.reply.id)}</strong> (${esc(c.reply.type)}) do ${esc(c.reply.device)} · ${esc(ago(c.at))}`).join('<br>') : 'nenhum clique ainda'}</div>
+						</div></div>`
+					}).join('') || emptyList('Nenhum teste enviado ainda.')
+					box.querySelectorAll('[data-mark]').forEach(cb => cb.onchange = () => { const all = marksGet(); all[cb.dataset.mark] = { ...(all[cb.dataset.mark]||{}), [cb.dataset.dev]: cb.checked }; marksSet(all) })
+				} catch (e) { box.innerHTML = emptyList('Erro: '+e.message) }
 			}
 
 			/* ---------- API docs (rendered + download) ---------- */
