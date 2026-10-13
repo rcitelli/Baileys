@@ -272,7 +272,9 @@
 
 			/* detail modal tabs + lists */
 			dialog.wide { width: min(620px, 96vw); }
-			.tabs { display: flex; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+			.tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+			/* No celular as 4 abas não cabem numa linha: quebram (a última sumia). */
+			@media (max-width: 520px) { .tabs { padding: 0 10px; } .tabs button { padding: 10px 8px; font-size: 13px; } }
 			.tabs button { border: none; background: none; color: var(--muted); font-weight: 600; font-size: 13.5px; padding: 12px 12px; border-bottom: 2px solid transparent; margin-bottom: -1px; }
 			.tabs button.active { color: var(--accent-2); border-bottom-color: var(--accent); }
 			:root:not([data-theme='light']) .tabs button.active { color: var(--accent); }
