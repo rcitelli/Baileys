@@ -586,6 +586,14 @@ export class Session extends EventEmitter {
 			entry.status = 'sent'
 		}
 
+		// Same as `sendMessage` with `emitOwnEvents`: our own message also comes out
+		// as a `messages.upsert` (webhooks and the activity history see it).
+		process.nextTick(() => {
+			sock.upsertMessage(full, 'append').catch(err =>
+				logger.warn({ session: this.id, err: (err as Error).message }, 'own interactive upsert failed')
+			)
+		})
+
 		return { key: full.key, recipe: name }
 	}
 
