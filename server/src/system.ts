@@ -25,10 +25,21 @@ let waVersion: WaVersionInfo | undefined
  * the live version from web.whatsapp.com, then master, then the bundled default.
  * `WA_VERSION=2.3000.x` pins it (incident escape hatch). Cached for an hour.
  */
+/** Sessions starting together (manager.init) share ONE lookup in flight. */
+let inflightWaVersion: Promise<WaVersionInfo> | undefined
+
 export const resolveWaVersion = async (force = false): Promise<WaVersionInfo> => {
 	if (!force && waVersion && Date.now() - Date.parse(waVersion.resolvedAt) < WA_VERSION_TTL_MS) {
 		return waVersion
 	}
+
+	inflightWaVersion ??= lookupWaVersion().finally(() => {
+		inflightWaVersion = undefined
+	})
+	return inflightWaVersion
+}
+
+const lookupWaVersion = async (): Promise<WaVersionInfo> => {
 
 	const now = new Date().toISOString()
 	const pinned = process.env.WA_VERSION?.split('.').map(Number)
