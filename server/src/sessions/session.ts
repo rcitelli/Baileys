@@ -1045,6 +1045,21 @@ export class Session extends EventEmitter {
 		return this.requireSock().readMessages(keys)
 	}
 
+	/** Groups this session participates in (metadata incl. participants), keyed by jid. */
+	async listGroups() {
+		return this.requireSock().groupFetchAllParticipating()
+	}
+
+	/** One group's metadata (subject + participants with phoneNumber/lid when known). */
+	async groupMetadata(jid: string) {
+		return this.requireSock().groupMetadata(jid)
+	}
+
+	/** Leave a group (the session stops receiving and sending there). */
+	async leaveGroup(jid: string) {
+		return this.requireSock().groupLeave(jid)
+	}
+
 	/** Gracefully stop the socket without deleting credentials (survives restart). */
 	async stop(): Promise<void> {
 		this.stopped = true
