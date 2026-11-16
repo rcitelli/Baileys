@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { rm } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { Boom } from '@hapi/boom'
 import makeWASocket, {
@@ -317,6 +318,13 @@ export class Session extends EventEmitter {
 		this.stopped = false
 
 		try {
+			// Credenciais de uma sessão deslogada estão mortas: reabrir com elas só
+			// devolve 401 (logged_out) de novo e o QR nunca nasce. Recomeça do zero
+			// (só o auth/ — meta e histórico ficam).
+			if (this.status === 'logged_out') {
+				await this.resetAuth()
+			}
+
 			const { state, saveCreds } = await useMultiFileAuthState(this.paths.authDir)
 			this.saveCreds = saveCreds
 
@@ -654,8 +662,10 @@ export class Session extends EventEmitter {
 			this.lastDisconnectReason = lastDisconnect?.error?.message ?? String(statusCode ?? 'unknown')
 
 			if (statusCode === DisconnectReason.loggedOut) {
+				this.sock = undefined
+				await this.resetAuth()
 				this.setStatus('logged_out')
-				logger.warn({ session: this.id }, 'session logged out from phone')
+				logger.warn({ session: this.id }, 'session logged out from phone; credentials cleared, next start shows a QR')
 			} else {
 				this.setStatus('close')
 				this.scheduleReconnect()
@@ -1430,6 +1440,21 @@ export class Session extends EventEmitter {
 		}
 
 		this.sock = undefined
+		await this.resetAuth()
 		this.setStatus('logged_out')
+	}
+
+	/**
+	 * Apaga só as credenciais (``auth/``) para o próximo start parear do zero com QR.
+	 * Meta (nome, webhook, eventos) e histórico em disco ficam intactos.
+	 */
+	private async resetAuth(): Promise<void> {
+		this.qrString = undefined
+		this.qrDataUrl = undefined
+		try {
+			await rm(this.paths.authDir, { recursive: true, force: true })
+		} catch (error) {
+			logger.warn({ session: this.id, err: (error as Error).message }, 'could not clear credentials')
+		}
 	}
 }

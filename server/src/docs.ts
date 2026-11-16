@@ -56,8 +56,8 @@ Códigos: \`400\` inválido · \`401\` não autenticado · \`403\` proibido (ex.
 | GET | \`/api/sessions/:id\` | Detalhes/status. |
 | PATCH | \`/api/sessions/:id\` | Atualiza \`name\`, \`webhookUrl\`, \`webhookEvents\`. |
 | DELETE | \`/api/sessions/:id\` | Desloga e apaga as credenciais do disco. |
-| POST | \`/api/sessions/:id/restart\` | Reinicia o socket (mantém credenciais). |
-| POST | \`/api/sessions/:id/logout\` | Desloga do aparelho (exige novo QR). |
+| POST | \`/api/sessions/:id/restart\` | Reinicia o socket (mantém credenciais; se a sessão está \`logged_out\`, apaga as credenciais mortas e gera QR novo). |
+| POST | \`/api/sessions/:id/logout\` | Desloga do aparelho e apaga as credenciais (o próximo restart gera QR). |
 | GET | \`/api/sessions/:id/qr\` | \`{ status, qr, qrImage }\` — \`qrImage\` é um data URL PNG. |
 | GET | \`/api/sessions/:id/events\` | **SSE**: stream de \`{ info, qr }\` a cada mudança. |
 | POST | \`/api/sessions/:id/pairing-code\` | Body \`{ phoneNumber }\` → código de pareamento. |
